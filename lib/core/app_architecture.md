@@ -109,6 +109,34 @@ authServiceProvider: Firebase Auth 처리
 projectRepositoryProvider: Firestore vs Local 저장소 결정
 ```
 
+### 상태 관리 의존 관계 (세부)
+
+| Provider | 역할 | 의존성 / 참고 |
+| --- | --- | --- |
+| `authServiceProvider` | Firebase Auth 인스턴스 | Firebase 초기화 이후 사용 |
+| `authStateChangesProvider` | 인증 상태 스트림 | `authServiceProvider` |
+| `currentUserProvider` | 로그인 사용자 정보 | `authStateChangesProvider` |
+| `currentUserIdProvider` | 로그인 UID | `currentUserProvider` |
+| `effectiveUserIdProvider` | 인증/게스트 사용자 ID 라우팅 | `currentUserIdProvider`, 로컬 Fallback ID |
+| `projectRepositoryProvider` | Firestore / Local 저장소 선택 | `effectiveUserIdProvider`, `authStateChangesProvider` |
+| `projectListProvider` | 프로젝트 리스트 로딩/캐싱 | `projectRepositoryProvider` |
+| `projectByIdProvider` | 단일 프로젝트 스트림 | `projectRepositoryProvider`, `effectiveUserIdProvider` |
+| `currentProjectProvider` | 에디터 UI에서 선택된 프로젝트 | `projectListProvider` 갱신을 수신 |
+| `projectCreationProvider` 등 | 프로젝트 생성/AI 연동 등 상태 | 위의 기본 Provider 들을 조합 |
+
+→ Provider간 순환 의존이 없도록 유지하고, 신규 기능 추가 시 위 표에 업데이트합니다.
+
+## 🧱 공통 UI 컴포넌트 현황
+
+- `presentation/widgets/common/`
+  - `custom_app_bar.dart` : 상단 앱바 공통 스타일  
+  - `empty_state.dart` : 비어 있는 리스트/검색 결과 안내  
+  - `login_required_dialog.dart` : 로그인 안내 모달  
+  - `project_card.dart` : 프로젝트 카드 UI
+- 향후 추출 예정
+  - 반복되는 섹션 헤더, 정보 카드 (`_SectionTitle`, `_PlaceholderCard` 등) → 별도 파일로 승격 검토
+  - 다이얼로그/토스트 스타일 통합 (`_showSnackBar` 유틸화)
+
 ## 🗺️ 향후 확장 포인트 (계획)
 
 - AI/아바타 실제 API 연동 (`SlideAIService`, `AvatarAudioService` 교체)
