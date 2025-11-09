@@ -406,14 +406,19 @@ class _EditableElementState extends State<_EditableElement> {
   void _changeFontSize(double delta) {
     final current = _fontSize;
     final newSize = (current + delta).clamp(_minFontSize, _maxFontSize).toDouble();
-    if ((newSize - current).abs() < 0.1) return;
+    _setFontSize(newSize);
+  }
+
+  void _setFontSize(double newSize) {
+    final clamped = newSize.clamp(_minFontSize, _maxFontSize).toDouble();
+    if ((_fontSize - clamped).abs() < 0.1) return;
 
     setState(() {
-      _fontSizeOverride = newSize;
+      _fontSizeOverride = clamped;
     });
 
     final updatedElement = widget.element.copyWith(
-      style: widget.element.style.copyWith(fontSize: newSize),
+      style: widget.element.style.copyWith(fontSize: clamped),
     );
 
     widget.onElementCommitted(updatedElement);
@@ -614,6 +619,7 @@ class _EditableElementState extends State<_EditableElement> {
                 fontSize: _fontSize,
                 onDecrease: () => _changeFontSize(-2),
                 onIncrease: () => _changeFontSize(2),
+                onSet: _setFontSize,
               ),
             ),
         ],
@@ -979,16 +985,92 @@ Color _colorFromHex(String? hex, {required Color fallback}) {
   return fallback;
 }
 
-class _FontSizeToolbar extends StatelessWidget {
+class _FontSizeToolbar extends StatefulWidget {
   const _FontSizeToolbar({
     required this.fontSize,
     required this.onDecrease,
     required this.onIncrease,
+    required this.onSet,
   });
 
   final double fontSize;
   final VoidCallback onDecrease;
   final VoidCallback onIncrease;
+  final ValueChanged<double> onSet;
+
+  @override
+  State<_FontSizeToolbar> createState() => _FontSizeToolbarState();
+}
+
+class _FontSizeToolbarState extends State<_FontSizeToolbar> {
+  static const double _buttonWidth = 40;
+  static const double _fieldWidth = 64;
+  bool _isEditing = false;
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: _format(widget.fontSize));
+    _focusNode = FocusNode();
+    _focusNode.addListener(_handleFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant _FontSizeToolbar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isEditing && oldWidget.fontSize != widget.fontSize) {
+      _controller.text = _format(widget.fontSize);
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_handleFocusChange);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChange() {
+    if (!_focusNode.hasFocus && _isEditing) {
+      _submit();
+    }
+  }
+
+  void _startEditing() {
+    setState(() {
+      _isEditing = true;
+      _controller
+        ..text = _format(widget.fontSize)
+        ..selection = TextSelection(baseOffset: 0, extentOffset: _controller.text.length);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _focusNode.requestFocus();
+      }
+    });
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    final parsed = double.tryParse(text);
+    if (parsed != null) {
+      widget.onSet(parsed);
+    } else {
+      _controller.text = _format(widget.fontSize);
+    }
+    setState(() {
+      _isEditing = false;
+    });
+  }
+
+  String _format(double value) {
+    return value.truncateToDouble() == value
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(1);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1004,21 +1086,58 @@ class _FontSizeToolbar extends StatelessWidget {
           children: [
             _FontSizeButton(
               icon: Icons.remove,
-              onPressed: onDecrease,
+              width: _buttonWidth,
+              onPressed: widget.onDecrease,
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(
-                '${fontSize.toStringAsFixed(fontSize.truncateToDouble() == fontSize ? 0 : 1)}pt',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+            SizedBox(
+              width: _fieldWidth,
+              height: 28,
+              child: _isEditing
+                  ? TextField(
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      autofocus: true,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        isCollapsed: true,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white54),
+                          borderRadius: BorderRadius.all(Radius.circular(6)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white70),
+                          borderRadius: BorderRadius.all(Radius.circular(6)),
+                        ),
+                      ),
+                      cursorColor: Colors.white,
+                      onSubmitted: (_) => _submit(),
+                    )
+                  : GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _startEditing,
+                      child: Container(
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        child: Text(
+                          '${_format(widget.fontSize)}pt',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
             ),
             _FontSizeButton(
               icon: Icons.add,
-              onPressed: onIncrease,
+              width: _buttonWidth,
+              onPressed: widget.onIncrease,
             ),
           ],
         ),
@@ -1031,10 +1150,12 @@ class _FontSizeButton extends StatelessWidget {
   const _FontSizeButton({
     required this.icon,
     required this.onPressed,
+    required this.width,
   });
 
   final IconData icon;
   final VoidCallback onPressed;
+  final double width;
 
   @override
   Widget build(BuildContext context) {
@@ -1044,7 +1165,7 @@ class _FontSizeButton extends StatelessWidget {
       onPanDown: (_) {},
       onTap: onPressed,
       child: SizedBox(
-        width: 40,
+        width: width,
         height: 32,
         child: Icon(icon, size: 20, color: Colors.white),
       ),
