@@ -161,12 +161,16 @@ class _ContentPane extends StatefulWidget {
 
 class _ContentPaneState extends State<_ContentPane> {
   late final TextEditingController _titleController;
+  late final TextEditingController _bodyController;
   slide_models.SlideData? _draftSlide;
 
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.slide?.title ?? '');
+    _bodyController = TextEditingController(
+      text: widget.slide?.metadata['body']?.toString() ?? '',
+    );
   }
 
   @override
@@ -184,12 +188,17 @@ class _ContentPaneState extends State<_ContentPane> {
       _titleController
         ..text = incomingSlide?.title ?? ''
         ..selection = TextSelection.collapsed(offset: _titleController.text.length);
+      _bodyController.text =
+          incomingSlide?.metadata['body']?.toString() ?? '';
+      _bodyController.selection =
+          TextSelection.collapsed(offset: _bodyController.text.length);
     }
   }
 
   @override
   void dispose() {
     _titleController.dispose();
+    _bodyController.dispose();
     super.dispose();
   }
 
@@ -274,19 +283,6 @@ class _ContentPaneState extends State<_ContentPane> {
                     },
                     itemBuilder: (context, index) {
                       final element = currentSlide.elements[index];
-                      final importance =
-                          element.data['importance']?.toString() ?? 'normal';
-                      final textStyle = Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(
-                            fontWeight: importance == 'highlight'
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            color: importance == 'highlight'
-                                ? AppTheme.primaryColor
-                                : AppTheme.textPrimaryColor,
-                          );
 
                       return Card(
                         key: ValueKey(element.id),
@@ -312,6 +308,13 @@ class _ContentPaneState extends State<_ContentPane> {
                                 ),
                               ),
                               const SizedBox(width: 4),
+                              _ListIndicator(
+                                index: index,
+                                listType:
+                                    element.data['listType']?.toString() ??
+                                        'bullet',
+                              ),
+                              const SizedBox(width: 8),
                               Expanded(
                                 child: TextFormField(
                                   key: ValueKey('point-${element.id}'),
@@ -322,7 +325,6 @@ class _ContentPaneState extends State<_ContentPane> {
                                     hintText: '핵심 포인트를 입력하세요',
                                     border: InputBorder.none,
                                   ),
-                                  style: textStyle,
                                   onChanged: (value) {
                                     _updatePoint(
                                       currentSlide,
@@ -337,20 +339,18 @@ class _ContentPaneState extends State<_ContentPane> {
                                 ),
                               ),
                               IconButton(
-                                tooltip: importance == 'highlight'
-                                    ? '강조 해제'
-                                    : '중요 포인트로 강조',
-                                onPressed: () => _togglePointImportance(
+                                tooltip: '리스트 형식 전환',
+                                onPressed: () => _toggleListType(
                                   currentSlide,
                                   element,
                                 ),
                                 icon: Icon(
-                                  importance == 'highlight'
-                                      ? Icons.star
-                                      : Icons.star_border,
-                                  color: importance == 'highlight'
-                                      ? AppTheme.primaryColor
-                                      : AppTheme.textSecondaryColor,
+                                  (element.data['listType']?.toString() ??
+                                              'bullet') ==
+                                          'numbered'
+                                      ? Icons.format_list_numbered
+                                      : Icons.format_list_bulleted,
+                                  color: AppTheme.textSecondaryColor,
                                 ),
                               ),
                               IconButton(
@@ -366,6 +366,34 @@ class _ContentPaneState extends State<_ContentPane> {
                     },
                   ),
           ),
+          const SizedBox(height: 24),
+          _SectionTitle('슬라이드 본문'),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 160,
+            child: TextField(
+              controller: _bodyController,
+              expands: true,
+              maxLines: null,
+              textAlignVertical: TextAlignVertical.top,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: '슬라이드 본문 또는 추가 설명을 입력하세요',
+              ),
+              onChanged: (value) {
+                final updatedSlide = currentSlide.copyWith(
+                  metadata: {
+                    ...currentSlide.metadata,
+                    'body': value,
+                  },
+                );
+                setState(() {
+                  _draftSlide = updatedSlide;
+                });
+                widget.onSlideUpdated(updatedSlide);
+              },
+            ),
+          ),
         ],
       ),
     );
@@ -377,7 +405,7 @@ class _ContentPaneState extends State<_ContentPane> {
       data: {
         'text': '새로운 핵심 포인트',
         'style': 'bullet',
-        'importance': 'normal',
+        'listType': 'bullet',
       },
     );
     final updatedSlide = slide.addElement(newElement);
@@ -395,25 +423,6 @@ class _ContentPaneState extends State<_ContentPane> {
     widget.onSlideUpdated(updatedSlide);
   }
 
-  void _togglePointImportance(
-    slide_models.SlideData slide,
-    slide_models.SlideElement element,
-  ) {
-    final currentImportance =
-        element.data['importance']?.toString() ?? 'normal';
-    final nextImportance =
-        currentImportance == 'highlight' ? 'normal' : 'highlight';
-
-    final updatedElement = element.copyWith(
-      data: {
-        ...element.data,
-        'importance': nextImportance,
-      },
-    );
-
-    _updatePoint(slide, updatedElement);
-  }
-
   void _updatePoint(
     slide_models.SlideData slide,
     slide_models.SlideElement updatedElement,
@@ -426,6 +435,21 @@ class _ContentPaneState extends State<_ContentPane> {
     widget.onSlideUpdated(updatedSlide);
   }
 
+  void _toggleListType(
+    slide_models.SlideData slide,
+    slide_models.SlideElement element,
+  ) {
+    final currentType = element.data['listType']?.toString() ?? 'bullet';
+    final nextType = currentType == 'numbered' ? 'bullet' : 'numbered';
+    final updatedElement = element.copyWith(
+      data: {
+        ...element.data,
+        'listType': nextType,
+      },
+    );
+    _updatePoint(slide, updatedElement);
+  }
+
   void _reorderPoint(slide_models.SlideData slide, int oldIndex, int newIndex) {
     if (oldIndex < newIndex) {
       newIndex -= 1;
@@ -435,6 +459,36 @@ class _ContentPaneState extends State<_ContentPane> {
       _draftSlide = updatedSlide;
     });
     widget.onSlideUpdated(updatedSlide);
+  }
+}
+
+class _ListIndicator extends StatelessWidget {
+  const _ListIndicator({
+    required this.index,
+    required this.listType,
+  });
+
+  final int index;
+  final String listType;
+
+  @override
+  Widget build(BuildContext context) {
+    if (listType == 'numbered') {
+      return Text(
+        '${index + 1}.',
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+      );
+    }
+    return const Padding(
+      padding: EdgeInsets.only(top: 8),
+      child: Icon(
+        Icons.fiber_manual_record,
+        size: 10,
+        color: AppTheme.textSecondaryColor,
+      ),
+    );
   }
 }
 

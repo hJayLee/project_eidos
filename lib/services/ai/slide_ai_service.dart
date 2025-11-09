@@ -316,7 +316,7 @@ JSON 형식으로만 응답해주세요.''';
             data: {
               'text': point,
               'style': 'bullet',
-                  'importance': 'normal',
+                  'listType': 'bullet',
             },
           ),
       ];
