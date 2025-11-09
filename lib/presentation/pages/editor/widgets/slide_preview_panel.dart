@@ -156,35 +156,6 @@ class _SlideHeader extends StatelessWidget {
               ),
             ],
           ),
-          if ((speakerNotes ?? '').isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border:
-                Border.all(
-                  color: AppTheme.primaryColor.withValues(alpha: 0.2),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.notes_outlined,
-                      size: 18, color: AppTheme.primaryColor),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      speakerNotes!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ],
       ),
     );

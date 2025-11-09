@@ -274,6 +274,19 @@ class _ContentPaneState extends State<_ContentPane> {
                     },
                     itemBuilder: (context, index) {
                       final element = currentSlide.elements[index];
+                      final importance =
+                          element.data['importance']?.toString() ?? 'normal';
+                      final textStyle = Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(
+                            fontWeight: importance == 'highlight'
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            color: importance == 'highlight'
+                                ? AppTheme.primaryColor
+                                : AppTheme.textPrimaryColor,
+                          );
 
                       return Card(
                         key: ValueKey(element.id),
@@ -309,6 +322,7 @@ class _ContentPaneState extends State<_ContentPane> {
                                     hintText: '핵심 포인트를 입력하세요',
                                     border: InputBorder.none,
                                   ),
+                                  style: textStyle,
                                   onChanged: (value) {
                                     _updatePoint(
                                       currentSlide,
@@ -320,6 +334,23 @@ class _ContentPaneState extends State<_ContentPane> {
                                       ),
                                     );
                                   },
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: importance == 'highlight'
+                                    ? '강조 해제'
+                                    : '중요 포인트로 강조',
+                                onPressed: () => _togglePointImportance(
+                                  currentSlide,
+                                  element,
+                                ),
+                                icon: Icon(
+                                  importance == 'highlight'
+                                      ? Icons.star
+                                      : Icons.star_border,
+                                  color: importance == 'highlight'
+                                      ? AppTheme.primaryColor
+                                      : AppTheme.textSecondaryColor,
                                 ),
                               ),
                               IconButton(
@@ -346,6 +377,7 @@ class _ContentPaneState extends State<_ContentPane> {
       data: {
         'text': '새로운 핵심 포인트',
         'style': 'bullet',
+        'importance': 'normal',
       },
     );
     final updatedSlide = slide.addElement(newElement);
@@ -361,6 +393,25 @@ class _ContentPaneState extends State<_ContentPane> {
       _draftSlide = updatedSlide;
     });
     widget.onSlideUpdated(updatedSlide);
+  }
+
+  void _togglePointImportance(
+    slide_models.SlideData slide,
+    slide_models.SlideElement element,
+  ) {
+    final currentImportance =
+        element.data['importance']?.toString() ?? 'normal';
+    final nextImportance =
+        currentImportance == 'highlight' ? 'normal' : 'highlight';
+
+    final updatedElement = element.copyWith(
+      data: {
+        ...element.data,
+        'importance': nextImportance,
+      },
+    );
+
+    _updatePoint(slide, updatedElement);
   }
 
   void _updatePoint(
