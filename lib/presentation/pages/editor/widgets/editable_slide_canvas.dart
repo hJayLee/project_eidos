@@ -510,7 +510,7 @@ class _EditableElementState extends State<_EditableElement> {
     final child = _buildContent(context, element);
     final hasFontToolbar = widget.isSelected && _isTextElement;
     const toolbarHeight = 40.0;
-    const toolbarMinWidth = 140.0;
+    const toolbarMinWidth = 168.0;
 
     double containerWidth = _size.width;
     double containerLeft = _position.x;
