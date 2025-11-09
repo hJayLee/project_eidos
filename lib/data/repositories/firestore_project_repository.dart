@@ -2,6 +2,36 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/project.dart';
 import 'local_project_repository.dart';
 
+Map<String, dynamic> _sanitizeForFirestore(Map<String, dynamic> input) {
+  final sanitized = <String, dynamic>{};
+  input.forEach((key, value) {
+    sanitized[key] = _sanitizeValue(value);
+  });
+  return sanitized;
+}
+
+List<dynamic> _sanitizeList(List<dynamic> list) {
+  return list
+      .map((value) => _sanitizeValue(value))
+      .where((value) => value != null)
+      .toList();
+}
+
+dynamic _sanitizeValue(dynamic value) {
+  if (value == null) return null;
+  if (value is num || value is bool || value is String) return value;
+  if (value is DateTime) return Timestamp.fromDate(value);
+  if (value is Timestamp || value is GeoPoint) return value;
+  if (value is List) {
+    return _sanitizeList(value);
+  }
+  if (value is Map) {
+    return _sanitizeForFirestore(value.map((key, val) => MapEntry(key.toString(), _sanitizeValue(val))));
+  }
+  if (value is Enum) return value.name;
+  return value.toString();
+}
+
 /// Firestore 기반 프로젝트 저장소
 class FirestoreProjectRepository implements ProjectRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -45,9 +75,8 @@ class FirestoreProjectRepository implements ProjectRepository {
   @override
   Future<void> createProject(String userId, LectureProject project) async {
     try {
-      final projectData = project.toJson();
-      // id는 문서 ID로 사용되므로 제거
-      projectData.remove('id');
+      final projectData = _sanitizeForFirestore(project.toJson())
+        ..remove('id');
       
       await _firestore
           .collection(_projectsPath(userId))
@@ -61,11 +90,9 @@ class FirestoreProjectRepository implements ProjectRepository {
   @override
   Future<void> updateProject(String userId, LectureProject project) async {
     try {
-      final projectData = project.toJson();
-      // id는 문서 ID로 사용되므로 제거
-      projectData.remove('id');
-      // updatedAt 업데이트
-      projectData['updatedAt'] = DateTime.now().toIso8601String();
+      final projectData = _sanitizeForFirestore(project.toJson())
+        ..remove('id')
+        ..['updatedAt'] = Timestamp.now();
       
       await _firestore
           .collection(_projectsPath(userId))
@@ -136,7 +163,6 @@ class FirestoreProjectRepository implements ProjectRepository {
   @override
   Future<void> shareProject(String userId, String projectId) async {
     try {
-      // 공유 프로젝트 컬렉션에 복사
       final projectDoc = await _firestore
           .collection(_projectsPath(userId))
           .doc(projectId)
@@ -146,9 +172,9 @@ class FirestoreProjectRepository implements ProjectRepository {
         throw Exception('프로젝트를 찾을 수 없습니다');
       }
 
-      final projectData = projectDoc.data()!;
-      projectData['sharedBy'] = userId;
-      projectData['sharedAt'] = DateTime.now().toIso8601String();
+      final projectData = _sanitizeForFirestore(projectDoc.data()!)
+        ..['sharedBy'] = userId
+        ..['sharedAt'] = Timestamp.now();
 
       await _firestore
           .collection('shared_projects')
