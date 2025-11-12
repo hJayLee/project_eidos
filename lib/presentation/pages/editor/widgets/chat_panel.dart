@@ -57,9 +57,7 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
     final scriptContent = buffer.toString().trim();
     if (scriptContent.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('슬라이드 생성을 위해 프롬프트 또는 스크립트 내용이 필요합니다'),
-        ),
+        const SnackBar(content: Text('슬라이드 생성을 위해 프롬프트 또는 스크립트 내용이 필요합니다')),
       );
       return;
     }
@@ -80,6 +78,9 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
       final slides = await SlideAIService.generateSlidesFromScript(
         script: script,
         category: widget.project.settings.templateCategory,
+        project: widget.project,
+        prompt: prompt.isNotEmpty ? prompt : null,
+        keywords: keywords.isNotEmpty ? keywords : null,
         maxSlides: _slideCount,
       );
 
@@ -93,7 +94,7 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
             metadata: {
               ...slides[i].metadata,
               'generatedAt': nowIso,
-              'generatedBy': 'SlideAIService',
+              'generatedBy': 'LangChainSlidePipeline',
               if (prompt.isNotEmpty) 'sourcePrompt': prompt,
               if (keywords.isNotEmpty) 'keywords': keywords,
             },
@@ -106,9 +107,7 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'AI 슬라이드 ${processedSlides.length}개가 생성되었습니다',
-            ),
+            content: Text('AI 슬라이드 ${processedSlides.length}개가 생성되었습니다'),
           ),
         );
       }
@@ -118,11 +117,9 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
         setState(() {
           _errorMessage = message;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('슬라이드 생성에 실패했습니다: $message'),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('슬라이드 생성에 실패했습니다: $message')));
       }
     } finally {
       if (mounted) {
@@ -144,11 +141,7 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                Icon(
-                  Icons.slideshow,
-                  color: AppTheme.primaryColor,
-                  size: 20,
-                ),
+                Icon(Icons.slideshow, color: AppTheme.primaryColor, size: 20),
                 const SizedBox(width: 8),
                 Text(
                   '슬라이드 생성',
@@ -177,21 +170,15 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
                       ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(
-                          color: AppTheme.borderColor,
-                        ),
+                        borderSide: BorderSide(color: AppTheme.borderColor),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(
-                          color: AppTheme.borderColor,
-                        ),
+                        borderSide: BorderSide(color: AppTheme.borderColor),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryColor,
-                        ),
+                        borderSide: BorderSide(color: AppTheme.primaryColor),
                       ),
                       contentPadding: const EdgeInsets.all(16),
                     ),
@@ -210,21 +197,15 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
                       ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(
-                          color: AppTheme.borderColor,
-                        ),
+                        borderSide: BorderSide(color: AppTheme.borderColor),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(
-                          color: AppTheme.borderColor,
-                        ),
+                        borderSide: BorderSide(color: AppTheme.borderColor),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(
-                          color: AppTheme.primaryColor,
-                        ),
+                        borderSide: BorderSide(color: AppTheme.primaryColor),
                       ),
                       contentPadding: const EdgeInsets.all(16),
                     ),
@@ -291,7 +272,9 @@ class _SlideGenerationPanelState extends State<SlideGenerationPanel> {
                               height: 16,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
                               ),
                             )
                           : const Icon(Icons.add),

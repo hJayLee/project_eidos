@@ -1,5 +1,7 @@
 import 'package:uuid/uuid.dart';
+
 import '../../core/constants/app_constants.dart';
+import '../utils/json_date_parser.dart';
 
 /// 슬라이드 데이터 모델
 class SlideData {
@@ -104,23 +106,21 @@ class SlideData {
       id: json['id'] as String? ?? '',
       title: json['title'] as String? ?? '',
       elements: (json['elements'] as List? ?? [])
-          .map((element) => SlideElement.fromJson(element as Map<String, dynamic>))
+          .map(
+            (element) => SlideElement.fromJson(element as Map<String, dynamic>),
+          )
           .toList(),
       duration: Duration(seconds: json['duration'] as int? ?? 0),
       layout: SlideLayout.values.firstWhere(
         (layout) => layout.name == json['layout'],
         orElse: () => SlideLayout.titleAndContent,
       ),
-      style: json['style'] != null 
+      style: json['style'] != null
           ? SlideStyle.fromJson(json['style'] as Map<String, dynamic>)
           : SlideStyle.defaultStyle(),
       backgroundImagePath: json['backgroundImagePath'] as String?,
-      createdAt: json['createdAt'] != null 
-          ? DateTime.parse(json['createdAt'] as String)
-          : DateTime.now(),
-      updatedAt: json['updatedAt'] != null 
-          ? DateTime.parse(json['updatedAt'] as String)
-          : DateTime.now(),
+      createdAt: parseDateTime(json['createdAt']),
+      updatedAt: parseDateTime(json['updatedAt']),
       order: json['order'] as int? ?? 0,
       speakerNotes: json['speakerNotes'] as String?,
       metadata: Map<String, dynamic>.from(json['metadata'] ?? {}),
@@ -154,10 +154,7 @@ class SlideData {
       return element.id == elementId ? updatedElement : element;
     }).toList();
 
-    return copyWith(
-      elements: updatedElements,
-      updatedAt: DateTime.now(),
-    );
+    return copyWith(elements: updatedElements, updatedAt: DateTime.now());
   }
 
   /// 요소 순서 변경
@@ -166,10 +163,7 @@ class SlideData {
     final element = updatedElements.removeAt(oldIndex);
     updatedElements.insert(newIndex, element);
 
-    return copyWith(
-      elements: updatedElements,
-      updatedAt: DateTime.now(),
-    );
+    return copyWith(elements: updatedElements, updatedAt: DateTime.now());
   }
 }
 
@@ -235,7 +229,9 @@ class SlideElement {
         orElse: () => SlideElementType.text,
       ),
       data: Map<String, dynamic>.from(json['data'] ?? {}),
-      position: ElementPosition.fromJson(json['position'] as Map<String, dynamic>),
+      position: ElementPosition.fromJson(
+        json['position'] as Map<String, dynamic>,
+      ),
       size: ElementSize.fromJson(json['size'] as Map<String, dynamic>),
       style: ElementStyle.fromJson(json['style'] as Map<String, dynamic>),
       isLocked: json['isLocked'] as bool? ?? false,
@@ -271,10 +267,7 @@ class ElementPosition {
   final double x;
   final double y;
 
-  const ElementPosition({
-    required this.x,
-    required this.y,
-  });
+  const ElementPosition({required this.x, required this.y});
 
   Map<String, dynamic> toJson() {
     return {'x': x, 'y': y};
@@ -288,10 +281,7 @@ class ElementPosition {
   }
 
   ElementPosition copyWith({double? x, double? y}) {
-    return ElementPosition(
-      x: x ?? this.x,
-      y: y ?? this.y,
-    );
+    return ElementPosition(x: x ?? this.x, y: y ?? this.y);
   }
 }
 
@@ -300,10 +290,7 @@ class ElementSize {
   final double width;
   final double height;
 
-  const ElementSize({
-    required this.width,
-    required this.height,
-  });
+  const ElementSize({required this.width, required this.height});
 
   /// 타입별 기본 크기
   factory ElementSize.fromType(SlideElementType type) {
@@ -389,10 +376,7 @@ class ElementStyle {
           textAlign: 'left',
         );
       case SlideElementType.image:
-        return const ElementStyle(
-          borderRadius: 8,
-          opacity: 1.0,
-        );
+        return const ElementStyle(borderRadius: 8, opacity: 1.0);
       case SlideElementType.chart:
         return const ElementStyle(
           backgroundColor: '#ffffff',
@@ -407,10 +391,7 @@ class ElementStyle {
           borderColor: '#e0e0e0',
         );
       case SlideElementType.icon:
-        return const ElementStyle(
-          color: '#333333',
-          opacity: 1.0,
-        );
+        return const ElementStyle(color: '#333333', opacity: 1.0);
       case SlideElementType.shape:
         return const ElementStyle(
           backgroundColor: '#007ACC',
@@ -418,18 +399,11 @@ class ElementStyle {
           opacity: 1.0,
         );
       case SlideElementType.video:
-        return const ElementStyle(
-          borderRadius: 8,
-          opacity: 1.0,
-        );
+        return const ElementStyle(borderRadius: 8, opacity: 1.0);
       case SlideElementType.background:
-        return const ElementStyle(
-          opacity: 1.0,
-        );
+        return const ElementStyle(opacity: 1.0);
       case SlideElementType.animation:
-        return const ElementStyle(
-          opacity: 1.0,
-        );
+        return const ElementStyle(opacity: 1.0);
     }
   }
 
@@ -461,7 +435,9 @@ class ElementStyle {
       borderRadius: (json['borderRadius'] as num?)?.toDouble(),
       opacity: (json['opacity'] as num?)?.toDouble(),
       textAlign: json['textAlign'] as String?,
-      customProperties: Map<String, dynamic>.from(json['customProperties'] ?? {}),
+      customProperties: Map<String, dynamic>.from(
+        json['customProperties'] ?? {},
+      ),
     );
   }
 
@@ -546,12 +522,7 @@ class SlideStyle {
         'body': {'fontSize': 16, 'fontWeight': 'normal'},
         'caption': {'fontSize': 12, 'fontWeight': 'normal'},
       },
-      spacing: {
-        'small': 8,
-        'medium': 16,
-        'large': 24,
-        'xlarge': 32,
-      },
+      spacing: {'small': 8, 'medium': 16, 'large': 24, 'xlarge': 32},
     );
   }
 

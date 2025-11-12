@@ -1,5 +1,7 @@
 import 'package:uuid/uuid.dart';
 
+import '../utils/json_date_parser.dart';
+
 /// 강의 스크립트 모델
 class Script {
   final String id;
@@ -19,9 +21,7 @@ class Script {
   });
 
   /// 새 스크립트 생성
-  factory Script.create({
-    required String content,
-  }) {
+  factory Script.create({required String content}) {
     final now = DateTime.now();
     return Script(
       id: const Uuid().v4(),
@@ -78,19 +78,27 @@ class Script {
     return Script(
       id: json['id'] as String,
       content: json['content'] as String,
-      chapters: (json['chapters'] as List?)
-              ?.map((chapter) => ScriptChapter.fromJson(chapter as Map<String, dynamic>))
+      chapters:
+          (json['chapters'] as List?)
+              ?.map(
+                (chapter) =>
+                    ScriptChapter.fromJson(chapter as Map<String, dynamic>),
+              )
               .toList() ??
           [],
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      createdAt: parseDateTime(json['createdAt']),
+      updatedAt: parseDateTime(json['updatedAt']),
       metadata: Map<String, dynamic>.from(json['metadata'] ?? {}),
     );
   }
 
   /// 단어 수 계산
   int get wordCount {
-    return content.trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).length;
+    return content
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .length;
   }
 
   /// 예상 읽기 시간 (분)
@@ -103,68 +111,78 @@ class Script {
   List<ScriptChapter> generateChapters() {
     final chapters = <ScriptChapter>[];
     final lines = content.split('\n');
-    
+
     String currentChapterTitle = '';
     String currentChapterContent = '';
     int chapterIndex = 0;
-    
+
     for (final line in lines) {
       final trimmedLine = line.trim();
-      
+
       // 챕터 제목 감지 (## 또는 # 으로 시작하는 라인)
       if (trimmedLine.startsWith('##') || trimmedLine.startsWith('#')) {
         // 이전 챕터 저장
-        if (currentChapterTitle.isNotEmpty && currentChapterContent.isNotEmpty) {
-          chapters.add(ScriptChapter(
-            id: const Uuid().v4(),
-            title: currentChapterTitle,
-            content: currentChapterContent.trim(),
-            order: chapterIndex,
-            startTime: _calculateStartTime(chapterIndex),
-            duration: _estimateChapterDuration(currentChapterContent),
-          ));
+        if (currentChapterTitle.isNotEmpty &&
+            currentChapterContent.isNotEmpty) {
+          chapters.add(
+            ScriptChapter(
+              id: const Uuid().v4(),
+              title: currentChapterTitle,
+              content: currentChapterContent.trim(),
+              order: chapterIndex,
+              startTime: _calculateStartTime(chapterIndex),
+              duration: _estimateChapterDuration(currentChapterContent),
+            ),
+          );
           chapterIndex++;
         }
-        
+
         // 새 챕터 시작
-        currentChapterTitle = trimmedLine.replaceFirst(RegExp(r'^#{1,2}\s*'), '');
+        currentChapterTitle = trimmedLine.replaceFirst(
+          RegExp(r'^#{1,2}\s*'),
+          '',
+        );
         currentChapterContent = '';
       } else if (trimmedLine.isNotEmpty) {
         currentChapterContent += '$line\n';
       }
     }
-    
+
     // 마지막 챕터 저장
     if (currentChapterTitle.isNotEmpty && currentChapterContent.isNotEmpty) {
-      chapters.add(ScriptChapter(
-        id: const Uuid().v4(),
-        title: currentChapterTitle,
-        content: currentChapterContent.trim(),
-        order: chapterIndex,
-        startTime: _calculateStartTime(chapterIndex),
-        duration: _estimateChapterDuration(currentChapterContent),
-      ));
+      chapters.add(
+        ScriptChapter(
+          id: const Uuid().v4(),
+          title: currentChapterTitle,
+          content: currentChapterContent.trim(),
+          order: chapterIndex,
+          startTime: _calculateStartTime(chapterIndex),
+          duration: _estimateChapterDuration(currentChapterContent),
+        ),
+      );
     }
-    
+
     // 챕터가 없으면 전체를 하나의 챕터로 처리
     if (chapters.isEmpty && content.trim().isNotEmpty) {
-      chapters.add(ScriptChapter(
-        id: const Uuid().v4(),
-        title: '메인 콘텐츠',
-        content: content.trim(),
-        order: 0,
-        startTime: Duration.zero,
-        duration: _estimateChapterDuration(content),
-      ));
+      chapters.add(
+        ScriptChapter(
+          id: const Uuid().v4(),
+          title: '메인 콘텐츠',
+          content: content.trim(),
+          order: 0,
+          startTime: Duration.zero,
+          duration: _estimateChapterDuration(content),
+        ),
+      );
     }
-    
+
     return chapters;
   }
 
   /// 챕터 시작 시간 계산
   Duration _calculateStartTime(int chapterIndex) {
     if (chapterIndex == 0) return Duration.zero;
-    
+
     double totalMinutes = 0;
     for (int i = 0; i < chapterIndex; i++) {
       if (i < chapters.length) {
@@ -176,7 +194,11 @@ class Script {
 
   /// 챕터 길이 추정
   Duration _estimateChapterDuration(String content) {
-    final words = content.trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).length;
+    final words = content
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .length;
     // 평균 읽기 속도: 분당 150단어
     final minutes = words / 150.0;
     return Duration(seconds: (minutes * 60).round());
@@ -184,22 +206,23 @@ class Script {
 
   /// 키워드 추출
   List<String> extractKeywords() {
-    final words = content.toLowerCase()
+    final words = content
+        .toLowerCase()
         .replaceAll(RegExp(r'[^\w\s가-힣]'), ' ')
         .split(RegExp(r'\s+'))
         .where((word) => word.length > 2)
         .toList();
-    
+
     // 단어 빈도 계산
     final wordFrequency = <String, int>{};
     for (final word in words) {
       wordFrequency[word] = (wordFrequency[word] ?? 0) + 1;
     }
-    
+
     // 빈도 순으로 정렬하여 상위 10개 반환
     final sortedWords = wordFrequency.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    
+
     return sortedWords.take(10).map((entry) => entry.key).toList();
   }
 }
@@ -273,7 +296,11 @@ class ScriptChapter {
 
   /// 단어 수
   int get wordCount {
-    return content.trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).length;
+    return content
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .length;
   }
 
   /// 챕터 복사
@@ -296,5 +323,3 @@ class ScriptChapter {
     );
   }
 }
-
-

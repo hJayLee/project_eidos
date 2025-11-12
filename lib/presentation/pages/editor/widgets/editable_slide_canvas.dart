@@ -20,24 +20,91 @@ class EditableSlideCanvas extends StatefulWidget {
   final ValueChanged<SlideData> onSlideUpdated;
 
   @override
-  State<EditableSlideCanvas> createState() => _EditableSlideCanvasState();
+  EditableSlideCanvasState createState() => EditableSlideCanvasState();
 }
 
-class _EditableSlideCanvasState extends State<EditableSlideCanvas> {
+class EditableSlideCanvasState extends State<EditableSlideCanvas> {
   String? _selectedElementId;
+  final ValueNotifier<SlideElement?> _selectedElementNotifier =
+      ValueNotifier<SlideElement?>(null);
 
   SlideData get _slide => widget.slide;
+
+  ValueListenable<SlideElement?> get selectionNotifier =>
+      _selectedElementNotifier;
+
+  SlideElement? get selectedElement {
+    final id = _selectedElementId;
+    if (id == null) return null;
+    for (final element in _slide.elements) {
+      if (element.id == id) return element;
+    }
+    return null;
+  }
+
+  bool get hasSelection => _selectedElementId != null;
+
+  bool get _selectedIsText => selectedElement?.type == SlideElementType.text;
+
+  double? get selectedTextFontSize {
+    if (!_selectedIsText) return null;
+    final element = selectedElement;
+    if (element == null) return null;
+    return element.style.fontSize ?? 16;
+  }
+
+  void deleteSelectedElement() {
+    final id = _selectedElementId;
+    if (id == null) return;
+    _deleteElement(id);
+  }
+
+  void setSelectedTextFontSize(double size) {
+    final element = selectedElement;
+    if (element == null || element.type != SlideElementType.text) return;
+
+    final clamped = size
+        .clamp(
+          _EditableElementState.minFontSize,
+          _EditableElementState.maxFontSize,
+        )
+        .toDouble();
+    final updated = element.copyWith(
+      style: element.style.copyWith(fontSize: clamped),
+    );
+    _updateElement(updated);
+  }
+
+  void nudgeSelectedTextFontSize(double delta) {
+    final currentSize = selectedTextFontSize;
+    if (currentSize == null) return;
+    setSelectedTextFontSize(currentSize + delta);
+  }
+
+  @override
+  void dispose() {
+    _selectedElementNotifier.dispose();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(covariant EditableSlideCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (_selectedElementId != null) {
-      final exists = _slide.elements
-          .any((element) => element.id == _selectedElementId);
+      final exists = _slide.elements.any(
+        (element) => element.id == _selectedElementId,
+      );
       if (!exists) {
         _selectedElementId = null;
+        _notifySelection();
+        return;
       }
     }
+    _notifySelection();
+  }
+
+  void _notifySelection() {
+    _selectedElementNotifier.value = selectedElement;
   }
 
   void _selectElement(String? elementId) {
@@ -45,6 +112,7 @@ class _EditableSlideCanvasState extends State<EditableSlideCanvas> {
     setState(() {
       _selectedElementId = elementId;
     });
+    _notifySelection();
   }
 
   void _updateElement(SlideElement element) {
@@ -59,6 +127,7 @@ class _EditableSlideCanvasState extends State<EditableSlideCanvas> {
       setState(() {
         _selectedElementId = null;
       });
+      _notifySelection();
     }
   }
 
@@ -75,7 +144,7 @@ class _EditableSlideCanvasState extends State<EditableSlideCanvas> {
       );
   }
 
-  Future<void> _addTextElement() async {
+  Future<void> addTextElement() async {
     final result = await _showPromptDialog(
       context: context,
       title: '텍스트 추가',
@@ -87,9 +156,7 @@ class _EditableSlideCanvasState extends State<EditableSlideCanvas> {
 
     final element = SlideElement.create(
       type: SlideElementType.text,
-      data: {
-        'text': result.isEmpty ? '새 텍스트' : result,
-      },
+      data: {'text': result.isEmpty ? '새 텍스트' : result},
     );
 
     final updatedSlide = _slide.addElement(element);
@@ -97,16 +164,18 @@ class _EditableSlideCanvasState extends State<EditableSlideCanvas> {
     setState(() {
       _selectedElementId = element.id;
     });
+    _notifySelection();
   }
 
-  Future<void> _addImageElement() async {
+  Future<void> addImageElement() async {
     try {
       FilePicker filePicker;
       try {
         filePicker = FilePicker.platform;
       } catch (error) {
         final isLateInitError =
-            error is Error && error.toString().contains('LateInitializationError');
+            error is Error &&
+            error.toString().contains('LateInitializationError');
         if (isLateInitError || error is UnsupportedError) {
           _showMessage('현재 플랫폼에서는 로컬 이미지 선택을 지원하지 않습니다.');
           return;
@@ -146,6 +215,7 @@ class _EditableSlideCanvasState extends State<EditableSlideCanvas> {
       setState(() {
         _selectedElementId = element.id;
       });
+      _notifySelection();
     } catch (error, stackTrace) {
       _showMessage('이미지를 불러오는 중 오류가 발생했습니다.');
       debugPrint('Image picker error: $error\n$stackTrace');
@@ -207,18 +277,6 @@ class _EditableSlideCanvasState extends State<EditableSlideCanvas> {
             );
           },
         ),
-        Positioned(
-          top: 16,
-          right: 16,
-          child: _CanvasToolbar(
-            onAddText: _addTextElement,
-            onAddImage: _addImageElement,
-            hasSelection: _selectedElementId != null,
-            onDeleteSelected: _selectedElementId == null
-                ? null
-                : () => _deleteElement(_selectedElementId!),
-          ),
-        ),
       ],
     );
   }
@@ -256,8 +314,8 @@ class _EditableElementState extends State<_EditableElement> {
   static const double _minHeight = 40;
   static const double _epsilon = 0.1;
   static const double _textPadding = 12;
-  static const double _minFontSize = 12;
-  static const double _maxFontSize = 96;
+  static const double minFontSize = 12;
+  static const double maxFontSize = 96;
 
   double? _fontSizeOverride;
 
@@ -297,13 +355,21 @@ class _EditableElementState extends State<_EditableElement> {
       final prevText = oldWidget.element.data['text']?.toString();
       final nextText = widget.element.data['text']?.toString();
       final nextFontSize = widget.element.style.fontSize;
+      final prevFontSize = oldWidget.element.style.fontSize;
 
-      if (_fontSizeOverride == null || (nextFontSize != null && nextFontSize != _fontSizeOverride)) {
+      if (_fontSizeOverride == null ||
+          (nextFontSize != null && nextFontSize != _fontSizeOverride)) {
         _fontSizeOverride = nextFontSize ?? _fontSizeOverride;
       }
 
       final textChanged = prevText != nextText;
+      final fontChanged = prevFontSize != nextFontSize;
       if (textChanged) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _autoSizeText(force: true);
+        });
+      } else if (fontChanged) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           _autoSizeText(force: true);
@@ -340,10 +406,12 @@ class _EditableElementState extends State<_EditableElement> {
   void _handleResizeUpdate(DragUpdateDetails details) {
     final maxWidth = math.max(0.0, widget.canvasSize.width - _position.x);
     final maxHeight = math.max(0.0, widget.canvasSize.height - _position.y);
-    final newWidth =
-        (_size.width + details.delta.dx).clamp(_minWidth, maxWidth).toDouble();
-    final newHeight =
-        (_size.height + details.delta.dy).clamp(_minHeight, maxHeight).toDouble();
+    final newWidth = (_size.width + details.delta.dx)
+        .clamp(_minWidth, maxWidth)
+        .toDouble();
+    final newHeight = (_size.height + details.delta.dy)
+        .clamp(_minHeight, maxHeight)
+        .toDouble();
 
     setState(() {
       _size = _size.copyWith(width: newWidth, height: newHeight);
@@ -358,9 +426,7 @@ class _EditableElementState extends State<_EditableElement> {
     final original = widget.element.position;
     if ((original.x - _position.x).abs() > _epsilon ||
         (original.y - _position.y).abs() > _epsilon) {
-      widget.onElementCommitted(
-        widget.element.copyWith(position: _position),
-      );
+      widget.onElementCommitted(widget.element.copyWith(position: _position));
     } else {
       setState(() {
         _position = original;
@@ -372,9 +438,7 @@ class _EditableElementState extends State<_EditableElement> {
     final original = widget.element.size;
     if ((original.width - _size.width).abs() > _epsilon ||
         (original.height - _size.height).abs() > _epsilon) {
-      widget.onElementCommitted(
-        widget.element.copyWith(size: _size),
-      );
+      widget.onElementCommitted(widget.element.copyWith(size: _size));
     } else {
       setState(() {
         _size = original;
@@ -390,10 +454,7 @@ class _EditableElementState extends State<_EditableElement> {
     if (!mounted || result == null) return;
 
     final updatedElement = widget.element.copyWith(
-      data: {
-        ...widget.element.data,
-        'text': result.isEmpty ? '새 텍스트' : result,
-      },
+      data: {...widget.element.data, 'text': result.isEmpty ? '새 텍스트' : result},
     );
 
     widget.onElementCommitted(updatedElement);
@@ -405,12 +466,14 @@ class _EditableElementState extends State<_EditableElement> {
 
   void _changeFontSize(double delta) {
     final current = _fontSize;
-    final newSize = (current + delta).clamp(_minFontSize, _maxFontSize).toDouble();
+    final newSize = (current + delta)
+        .clamp(minFontSize, maxFontSize)
+        .toDouble();
     _setFontSize(newSize);
   }
 
   void _setFontSize(double newSize) {
-    final clamped = newSize.clamp(_minFontSize, _maxFontSize).toDouble();
+    final clamped = newSize.clamp(minFontSize, maxFontSize).toDouble();
     if ((_fontSize - clamped).abs() < 0.1) return;
 
     setState(() {
@@ -432,14 +495,10 @@ class _EditableElementState extends State<_EditableElement> {
 
     if (text.isEmpty) {
       if (force) {
-        final defaultSize = ElementSize(width: 200, height: 80);
+        const defaultSize = ElementSize(width: 200, height: 80);
         if (_size != defaultSize) {
-          setState(() {
-            _size = defaultSize;
-          });
-          widget.onElementCommitted(
-            widget.element.copyWith(size: defaultSize),
-          );
+          setState(() => _size = defaultSize);
+          widget.onElementCommitted(widget.element.copyWith(size: defaultSize));
         }
       }
       return;
@@ -448,22 +507,19 @@ class _EditableElementState extends State<_EditableElement> {
     final computedSize = _calculateTextElementSize(text, fontSize);
     final differs =
         (computedSize.width - widget.element.size.width).abs() > _epsilon ||
-            (computedSize.height - widget.element.size.height).abs() > _epsilon;
+        (computedSize.height - widget.element.size.height).abs() > _epsilon;
 
     if (force || differs) {
-      setState(() {
-        _size = computedSize;
-      });
-      widget.onElementCommitted(
-        widget.element.copyWith(size: computedSize),
-      );
+      setState(() => _size = computedSize);
+      widget.onElementCommitted(widget.element.copyWith(size: computedSize));
     }
   }
 
   ElementSize _calculateTextElementSize(String text, double fontSize) {
+    const frameBuffer = 8.0;
     final maxContentWidth = math.max(
       _minWidth.toDouble(),
-      math.min(widget.canvasSize.width * 0.6, widget.canvasSize.width - 40),
+      math.min(widget.canvasSize.width * 0.6, widget.canvasSize.width - 48),
     );
 
     final textStyle = _textStyleForElement(widget.element, fontSize);
@@ -474,16 +530,27 @@ class _EditableElementState extends State<_EditableElement> {
       maxLines: null,
     )..layout(maxWidth: maxContentWidth - (_textPadding * 2));
 
-    final width = textPainter.width + (_textPadding * 2);
-    final height = textPainter.height + (_textPadding * 2);
+    final lineMetrics = textPainter.computeLineMetrics();
+    final longestLineWidth = lineMetrics.isEmpty
+        ? textPainter.width
+        : lineMetrics.map((metric) => metric.width).fold<double>(0, math.max);
 
-    final clampedWidth = width.clamp(_minWidth.toDouble(), widget.canvasSize.width - 24);
-    final clampedHeight = height.clamp(_minHeight.toDouble(), widget.canvasSize.height - 24);
+    final contentWidth = math.min(longestLineWidth, maxContentWidth);
+    final contentHeight = textPainter.height;
 
-    return ElementSize(
-      width: clampedWidth,
-      height: clampedHeight,
+    final width = contentWidth + (_textPadding * 2) + frameBuffer;
+    final height = contentHeight + (_textPadding * 2) + frameBuffer;
+
+    final clampedWidth = width.clamp(
+      _minWidth.toDouble(),
+      widget.canvasSize.width - 24,
     );
+    final clampedHeight = height.clamp(
+      _minHeight.toDouble(),
+      widget.canvasSize.height - 24,
+    );
+
+    return ElementSize(width: clampedWidth, height: clampedHeight);
   }
 
   TextStyle _textStyleForElement(SlideElement element, double fontSize) {
@@ -508,121 +575,52 @@ class _EditableElementState extends State<_EditableElement> {
   Widget build(BuildContext context) {
     final element = widget.element;
     final child = _buildContent(context, element);
-    final hasFontToolbar = widget.isSelected && _isTextElement;
-    const toolbarHeight = 40.0;
-    const toolbarMinWidth = 168.0;
-
-    double containerWidth = _size.width;
-    double containerLeft = _position.x;
-
-    final maxLeftForCurrentWidth =
-        math.max(0.0, widget.canvasSize.width - containerWidth);
-    containerLeft = containerLeft.clamp(0.0, maxLeftForCurrentWidth);
-
-    double toolbarWidth = toolbarMinWidth;
-    double toolbarLeft = 0;
-
-    if (hasFontToolbar) {
-      final neededWidth = math.max(toolbarMinWidth, _size.width);
-      final maxLeft = math.max(0.0, widget.canvasSize.width - neededWidth);
-      containerLeft = containerLeft.clamp(0.0, maxLeft);
-      containerWidth = neededWidth;
-
-      if (containerWidth < toolbarMinWidth) {
-        containerWidth = toolbarMinWidth;
-        containerLeft = containerLeft.clamp(
-          0.0,
-          math.max(0.0, widget.canvasSize.width - containerWidth),
-        );
-      }
-
-      toolbarWidth = toolbarMinWidth;
-      toolbarLeft = 0;
-    }
-
-    final elementOffsetLeft = (_position.x - containerLeft)
-        .clamp(0.0, containerWidth - _size.width);
-
-    final positionedTop = hasFontToolbar ? _position.y - toolbarHeight : _position.y;
-    final positionedHeight = hasFontToolbar ? _size.height + toolbarHeight : _size.height;
+    final isTextElement = _isTextElement;
 
     return Positioned(
-      left: containerLeft,
-      top: positionedTop,
-      width: containerWidth,
-      height: positionedHeight,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            top: hasFontToolbar ? toolbarHeight : 0,
-            left: elementOffsetLeft,
-            width: _size.width,
-            height: _size.height,
-            child: GestureDetector(
-              onTap: widget.onSelected,
-              onPanStart: _handlePanStart,
-              onPanUpdate: _handlePanUpdate,
-              onPanEnd: _handlePanEnd,
-              onPanCancel: _handlePanCancel,
-              onDoubleTap: _handleDoubleTap,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: widget.isSelected
-                            ? Border.all(
-                                color: AppTheme.primaryColor,
-                                width: 2,
-                              )
-                            : null,
-                        borderRadius: BorderRadius.circular(
-                          element.style.borderRadius ?? 0,
-                        ),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(
-                          element.style.borderRadius ?? 0,
-                        ),
-                        child: child,
-                      ),
-                    ),
+      left: _position.x,
+      top: _position.y,
+      width: _size.width,
+      height: _size.height,
+      child: GestureDetector(
+        onTap: widget.onSelected,
+        onPanStart: _handlePanStart,
+        onPanUpdate: _handlePanUpdate,
+        onPanEnd: _handlePanEnd,
+        onPanCancel: _handlePanCancel,
+        onDoubleTap: _handleDoubleTap,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: widget.isSelected
+                      ? Border.all(color: AppTheme.primaryColor, width: 2)
+                      : null,
+                  borderRadius: BorderRadius.circular(
+                    element.style.borderRadius ?? 0,
                   ),
-                  if (widget.isSelected)
-                    Positioned(
-                      top: -8,
-                      right: -8,
-                      child: _DeleteHandle(onDelete: widget.onDelete),
-                    ),
-                  if (widget.isSelected)
-                    Positioned(
-                      right: -8,
-                      bottom: -8,
-                      child: _ResizeHandle(
-                        onPanUpdate: _handleResizeUpdate,
-                        onPanEnd: _handleResizeEnd,
-                      ),
-                    ),
-                ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(
+                    element.style.borderRadius ?? 0,
+                  ),
+                  child: child,
+                ),
               ),
             ),
-          ),
-          if (hasFontToolbar)
-            Positioned(
-              top: 0,
-              left: toolbarLeft,
-              width: toolbarWidth,
-              height: toolbarHeight,
-              child: _FontSizeToolbar(
-                fontSize: _fontSize,
-                onDecrease: () => _changeFontSize(-2),
-                onIncrease: () => _changeFontSize(2),
-                onSet: _setFontSize,
+            if (widget.isSelected && !isTextElement)
+              Positioned(
+                right: -8,
+                bottom: -8,
+                child: _ResizeHandle(
+                  onPanUpdate: _handleResizeUpdate,
+                  onPanEnd: _handleResizeEnd,
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -646,11 +644,11 @@ class _EditableElementState extends State<_EditableElement> {
           child: Text(
             text,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: color,
-                  fontSize: fontSize,
-                  fontWeight: fontWeight,
-                  height: 1.4,
-                ),
+              color: color,
+              fontSize: fontSize,
+              fontWeight: fontWeight,
+              height: 1.4,
+            ),
             textAlign: textAlign,
           ),
         );
@@ -695,8 +693,8 @@ class _EditableElementState extends State<_EditableElement> {
           child: Text(
             '${element.type.name} 요소 편집은 곧 지원됩니다',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.textSecondaryColor,
-                ),
+              color: AppTheme.textSecondaryColor,
+            ),
             textAlign: TextAlign.center,
           ),
         );
@@ -714,9 +712,9 @@ class _EditableElementState extends State<_EditableElement> {
           const SizedBox(height: 8),
           Text(
             subtitle ?? '이미지를 불러올 수 없습니다',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.white70,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
             textAlign: TextAlign.center,
           ),
         ],
@@ -725,44 +723,8 @@ class _EditableElementState extends State<_EditableElement> {
   }
 }
 
-class _DeleteHandle extends StatelessWidget {
-  const _DeleteHandle({required this.onDelete});
-
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onDelete,
-      child: Container(
-        width: 20,
-        height: 20,
-        decoration: BoxDecoration(
-          color: Colors.redAccent,
-          borderRadius: BorderRadius.circular(6),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.redAccent.withValues(alpha: 0.35),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: const Icon(
-          Icons.close,
-          size: 14,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-}
-
 class _ResizeHandle extends StatelessWidget {
-  const _ResizeHandle({
-    required this.onPanUpdate,
-    required this.onPanEnd,
-  });
+  const _ResizeHandle({required this.onPanUpdate, required this.onPanEnd});
 
   final void Function(DragUpdateDetails) onPanUpdate;
   final void Function(DragEndDetails) onPanEnd;
@@ -786,90 +748,7 @@ class _ResizeHandle extends StatelessWidget {
             ),
           ],
         ),
-        child: const Icon(
-          Icons.open_in_full,
-          size: 14,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-}
-
-class _CanvasToolbar extends StatelessWidget {
-  const _CanvasToolbar({
-    required this.onAddText,
-    required this.onAddImage,
-    required this.hasSelection,
-    this.onDeleteSelected,
-  });
-
-  final VoidCallback onAddText;
-  final VoidCallback onAddImage;
-  final bool hasSelection;
-  final VoidCallback? onDeleteSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      color: Colors.black.withValues(alpha: 0.55),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            _ToolbarButton(
-              icon: Icons.text_fields,
-              label: '텍스트 추가',
-              onPressed: onAddText,
-            ),
-            const SizedBox(width: 8),
-            _ToolbarButton(
-              icon: Icons.image_outlined,
-              label: '이미지 추가',
-              onPressed: onAddImage,
-            ),
-            if (hasSelection && onDeleteSelected != null) ...[
-              const SizedBox(width: 12),
-              _ToolbarButton(
-                icon: Icons.delete_outline,
-                label: '선택 삭제',
-                onPressed: onDeleteSelected!,
-                color: Colors.redAccent,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ToolbarButton extends StatelessWidget {
-  const _ToolbarButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-    this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final effectiveColor = color ?? Colors.white;
-    return TextButton.icon(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: effectiveColor,
-      ),
-      icon: Icon(icon, size: 18),
-      label: Text(
-        label,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        child: const Icon(Icons.open_in_full, size: 14, color: Colors.white),
       ),
     );
   }
@@ -951,8 +830,7 @@ class _PromptDialogState extends State<_PromptDialog> {
           child: const Text('취소'),
         ),
         ElevatedButton(
-          onPressed: () =>
-              Navigator.of(context).pop(_controller.text.trim()),
+          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
           child: Text(widget.confirmLabel),
         ),
       ],
@@ -984,192 +862,3 @@ Color _colorFromHex(String? hex, {required Color fallback}) {
   }
   return fallback;
 }
-
-class _FontSizeToolbar extends StatefulWidget {
-  const _FontSizeToolbar({
-    required this.fontSize,
-    required this.onDecrease,
-    required this.onIncrease,
-    required this.onSet,
-  });
-
-  final double fontSize;
-  final VoidCallback onDecrease;
-  final VoidCallback onIncrease;
-  final ValueChanged<double> onSet;
-
-  @override
-  State<_FontSizeToolbar> createState() => _FontSizeToolbarState();
-}
-
-class _FontSizeToolbarState extends State<_FontSizeToolbar> {
-  static const double _buttonWidth = 40;
-  static const double _fieldWidth = 64;
-  bool _isEditing = false;
-  late final TextEditingController _controller;
-  late final FocusNode _focusNode;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: _format(widget.fontSize));
-    _focusNode = FocusNode();
-    _focusNode.addListener(_handleFocusChange);
-  }
-
-  @override
-  void didUpdateWidget(covariant _FontSizeToolbar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!_isEditing && oldWidget.fontSize != widget.fontSize) {
-      _controller.text = _format(widget.fontSize);
-    }
-  }
-
-  @override
-  void dispose() {
-    _focusNode.removeListener(_handleFocusChange);
-    _focusNode.dispose();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _handleFocusChange() {
-    if (!_focusNode.hasFocus && _isEditing) {
-      _submit();
-    }
-  }
-
-  void _startEditing() {
-    setState(() {
-      _isEditing = true;
-      _controller
-        ..text = _format(widget.fontSize)
-        ..selection = TextSelection(baseOffset: 0, extentOffset: _controller.text.length);
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _focusNode.requestFocus();
-      }
-    });
-  }
-
-  void _submit() {
-    final text = _controller.text.trim();
-    final parsed = double.tryParse(text);
-    if (parsed != null) {
-      widget.onSet(parsed);
-    } else {
-      _controller.text = _format(widget.fontSize);
-    }
-    setState(() {
-      _isEditing = false;
-    });
-  }
-
-  String _format(double value) {
-    return value.truncateToDouble() == value
-        ? value.toStringAsFixed(0)
-        : value.toStringAsFixed(1);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _FontSizeButton(
-              icon: Icons.remove,
-              width: _buttonWidth,
-              onPressed: widget.onDecrease,
-            ),
-            SizedBox(
-              width: _fieldWidth,
-              height: 28,
-              child: _isEditing
-                  ? TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      autofocus: true,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(
-                        isCollapsed: true,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                        border: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white54),
-                          borderRadius: BorderRadius.all(Radius.circular(6)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white70),
-                          borderRadius: BorderRadius.all(Radius.circular(6)),
-                        ),
-                      ),
-                      cursorColor: Colors.white,
-                      onSubmitted: (_) => _submit(),
-                    )
-                  : GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _startEditing,
-                      child: Container(
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                        child: Text(
-                          '${_format(widget.fontSize)}pt',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-            ),
-            _FontSizeButton(
-              icon: Icons.add,
-              width: _buttonWidth,
-              onPressed: widget.onIncrease,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FontSizeButton extends StatelessWidget {
-  const _FontSizeButton({
-    required this.icon,
-    required this.onPressed,
-    required this.width,
-  });
-
-  final IconData icon;
-  final VoidCallback onPressed;
-  final double width;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: (_) {},
-      onPanDown: (_) {},
-      onTap: onPressed,
-      child: SizedBox(
-        width: width,
-        height: 32,
-        child: Icon(icon, size: 20, color: Colors.white),
-      ),
-    );
-  }
-}
-

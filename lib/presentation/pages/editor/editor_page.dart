@@ -3,59 +3,49 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_theme.dart';
 import '../../../data/models/project.dart';
 import '../../../data/models/slide.dart';
+import '../../../services/ai/slide_ai_service.dart';
 import '../../providers/project_provider.dart';
 import 'widgets/editor_app_bar.dart';
 import 'widgets/slide_editor_tab.dart';
-import 'widgets/avatar_editor_tab.dart';
 import 'widgets/slide_list_panel.dart';
+import 'widgets/slide_creation_dialog.dart';
 
 /// 에디터 페이지
 class EditorPage extends ConsumerStatefulWidget {
   final String projectId;
 
-  const EditorPage({
-    super.key,
-    required this.projectId,
-  });
+  const EditorPage({super.key, required this.projectId});
 
   @override
   ConsumerState<EditorPage> createState() => _EditorPageState();
 }
 
-class _EditorPageState extends ConsumerState<EditorPage>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _EditorPageState extends ConsumerState<EditorPage> {
   int _selectedSlideIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final projectStream = ref.watch(projectByIdProvider(widget.projectId));
-    
+
     return projectStream.when(
       data: (project) {
         if (project == null) {
           return Scaffold(
-            appBar: AppBar(
-              title: const Text('프로젝트를 찾을 수 없습니다'),
-            ),
-            body: const Center(
-              child: Text('프로젝트를 찾을 수 없습니다'),
-            ),
+            appBar: AppBar(title: const Text('프로젝트를 찾을 수 없습니다')),
+            body: const Center(child: Text('프로젝트를 찾을 수 없습니다')),
           );
         }
-        
+
         return Scaffold(
           backgroundColor: AppTheme.backgroundColor,
           appBar: EditorAppBar(
@@ -64,59 +54,9 @@ class _EditorPageState extends ConsumerState<EditorPage>
             onExport: () => _exportProject(project),
             onBack: () => Navigator.of(context).pop(),
           ),
-          body: Column(
+          body: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 탭 헤더
-              Container(
-                color: AppTheme.surfaceColor,
-                child: TabBar(
-                  controller: _tabController,
-                  labelColor: AppTheme.primaryColor,
-                  unselectedLabelColor: AppTheme.textSecondaryColor,
-                  indicatorColor: AppTheme.primaryColor,
-                  tabs: const [
-                    Tab(
-                      icon: Icon(Icons.slideshow),
-                      text: '슬라이드',
-                    ),
-                    Tab(
-                      icon: Icon(Icons.face),
-                      text: '아바타',
-                    ),
-                  ],
-                ),
-              ),
-              // 탭 내용
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    SlideEditorTab(
-                      project: project,
-                      selectedSlideIndex: _selectedSlideIndex,
-                      onSlideSelected: (index) {
-                        setState(() {
-                          _selectedSlideIndex = index;
-                        });
-                      },
-                      onSlideChanged: (updatedSlide) =>
-                          _updateSlide(project, updatedSlide),
-                      onSlidesGenerated: (slides) =>
-                          _appendGeneratedSlides(project, slides),
-                    ),
-                    AvatarEditorTab(
-                      project: project,
-                      selectedSlideIndex: _selectedSlideIndex,
-                      onSlideSelected: (index) {
-                        setState(() {
-                          _selectedSlideIndex = index;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              // 슬라이드 목록 패널 (공용)
               SlideListPanel(
                 project: project,
                 selectedSlideIndex: _selectedSlideIndex,
@@ -125,43 +65,44 @@ class _EditorPageState extends ConsumerState<EditorPage>
                     _selectedSlideIndex = index;
                   });
                 },
-                onSlideAdded: () => _addSlide(project),
+                onSlideAdded: () => _openSlideCreationDialog(project),
                 onSlideDeleted: (index) => _deleteSlide(project, index),
-                onSlideReordered: (oldIndex, newIndex) => 
+                onSlideReordered: (oldIndex, newIndex) =>
                     _reorderSlides(project, oldIndex, newIndex),
+              ),
+              Expanded(
+                child: SlideEditorTab(
+                  project: project,
+                  selectedSlideIndex: _selectedSlideIndex,
+                  onSlideChanged: (updatedSlide) =>
+                      _updateSlide(project, updatedSlide),
+                ),
               ),
             ],
           ),
         );
       },
-      loading: () => const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      ),
+      loading: () =>
+          const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (error, stack) => Scaffold(
-        appBar: AppBar(
-          title: const Text('오류'),
-        ),
-        body: Center(
-          child: Text('프로젝트를 불러오는 중 오류가 발생했습니다: $error'),
-        ),
+        appBar: AppBar(title: const Text('오류')),
+        body: Center(child: Text('프로젝트를 불러오는 중 오류가 발생했습니다: $error')),
       ),
     );
   }
 
   void _saveProject(LectureProject project) {
     ref.read(projectListProvider.notifier).updateProject(project);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('프로젝트가 저장되었습니다')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('프로젝트가 저장되었습니다')));
   }
 
   void _exportProject(LectureProject project) {
     // TODO: 내보내기 기능 구현
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('내보내기 기능은 준비 중입니다')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('내보내기 기능은 준비 중입니다')));
   }
 
   List<SlideData> _normalizeSlideOrder(List<SlideData> slides) {
@@ -170,34 +111,101 @@ class _EditorPageState extends ConsumerState<EditorPage>
     ];
   }
 
-  Future<void> _addSlide(LectureProject project) async {
+  Future<void> _openSlideCreationDialog(LectureProject project) async {
+    final result = await SlideCreationDialog.show(context);
+    if (result == null) return;
+
+    if (result.createEmpty) {
+      await _createBlankSlide(project, result.title);
+    } else {
+      await _createSlideWithAI(project, result.title, result.prompt);
+    }
+  }
+
+  Future<void> _createBlankSlide(LectureProject project, String title) async {
+    final trimmedTitle = title.trim();
     final newIndex = project.slides.length;
     final newSlide = SlideData.create(
-      title: '새 슬라이드 ${newIndex + 1}',
+      title: trimmedTitle.isEmpty ? '새 슬라이드 ${newIndex + 1}' : trimmedTitle,
       order: newIndex,
     );
-    final updatedSlides = _normalizeSlideOrder([
-      ...project.slides,
-      newSlide,
-    ]);
+    final updatedSlides = _normalizeSlideOrder([...project.slides, newSlide]);
     final updatedProject = project.copyWith(slides: updatedSlides);
 
     try {
-      await ref.read(projectListProvider.notifier).updateProject(updatedProject);
+      await ref
+          .read(projectListProvider.notifier)
+          .updateProject(updatedProject);
       ref.read(currentProjectProvider.notifier).updateProject(updatedProject);
       if (mounted) {
         setState(() {
           _selectedSlideIndex = updatedSlides.length - 1;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('슬라이드가 추가되었습니다')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('빈 슬라이드가 추가되었습니다')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('슬라이드를 추가하지 못했습니다: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('슬라이드를 추가하지 못했습니다: $e')));
+      }
+    }
+  }
+
+  Future<void> _createSlideWithAI(
+    LectureProject project,
+    String title,
+    String prompt,
+  ) async {
+    if (!mounted) return;
+
+    final navigator = Navigator.of(context, rootNavigator: true);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final order = project.slides.length;
+      final generatedSlide = await SlideAIService.generateSlideFromPrompt(
+        project: project,
+        title: title,
+        prompt: prompt,
+        order: order,
+      );
+
+      final updatedSlides = _normalizeSlideOrder([
+        ...project.slides,
+        generatedSlide,
+      ]);
+
+      final updatedProject = project.copyWith(slides: updatedSlides);
+
+      await ref
+          .read(projectListProvider.notifier)
+          .updateProject(updatedProject);
+      ref.read(currentProjectProvider.notifier).updateProject(updatedProject);
+
+      if (mounted) {
+        setState(() {
+          _selectedSlideIndex = updatedSlides.length - 1;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('AI 슬라이드가 생성되었습니다')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('AI 슬라이드를 생성하지 못했습니다: $e')));
+      }
+    } finally {
+      if (navigator.mounted) {
+        navigator.pop();
       }
     }
   }
@@ -212,26 +220,27 @@ class _EditorPageState extends ConsumerState<EditorPage>
     final updatedProject = project.copyWith(slides: normalizedSlides);
 
     try {
-      await ref.read(projectListProvider.notifier).updateProject(updatedProject);
+      await ref
+          .read(projectListProvider.notifier)
+          .updateProject(updatedProject);
       ref.read(currentProjectProvider.notifier).updateProject(updatedProject);
       if (mounted) {
         setState(() {
           if (normalizedSlides.isEmpty) {
             _selectedSlideIndex = 0;
           } else {
-            _selectedSlideIndex =
-                index.clamp(0, normalizedSlides.length - 1);
+            _selectedSlideIndex = index.clamp(0, normalizedSlides.length - 1);
           }
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('슬라이드가 삭제되었습니다')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('슬라이드가 삭제되었습니다')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('슬라이드를 삭제하지 못했습니다: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('슬라이드를 삭제하지 못했습니다: $e')));
       }
     }
   }
@@ -247,13 +256,15 @@ class _EditorPageState extends ConsumerState<EditorPage>
     final updatedProject = project.copyWith(slides: updatedSlides);
 
     try {
-      await ref.read(projectListProvider.notifier).updateProject(updatedProject);
+      await ref
+          .read(projectListProvider.notifier)
+          .updateProject(updatedProject);
       ref.read(currentProjectProvider.notifier).updateProject(updatedProject);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('슬라이드를 업데이트하지 못했습니다: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('슬라이드를 업데이트하지 못했습니다: $e')));
       }
     }
   }
@@ -278,7 +289,9 @@ class _EditorPageState extends ConsumerState<EditorPage>
     final updatedProject = project.copyWith(slides: normalizedSlides);
 
     try {
-      await ref.read(projectListProvider.notifier).updateProject(updatedProject);
+      await ref
+          .read(projectListProvider.notifier)
+          .updateProject(updatedProject);
       ref.read(currentProjectProvider.notifier).updateProject(updatedProject);
       if (mounted) {
         setState(() {
@@ -295,9 +308,9 @@ class _EditorPageState extends ConsumerState<EditorPage>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('슬라이드 순서를 변경하지 못했습니다: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('슬라이드 순서를 변경하지 못했습니다: $e')));
       }
     }
   }
@@ -314,9 +327,7 @@ class _EditorPageState extends ConsumerState<EditorPage>
     final adjustedSlides = <SlideData>[];
 
     for (var i = 0; i < generatedSlides.length; i++) {
-      adjustedSlides.add(
-        generatedSlides[i].copyWith(order: baseOrder + i),
-      );
+      adjustedSlides.add(generatedSlides[i].copyWith(order: baseOrder + i));
     }
 
     final updatedSlides = _normalizeSlideOrder([
@@ -327,30 +338,25 @@ class _EditorPageState extends ConsumerState<EditorPage>
     final updatedProject = project.copyWith(slides: updatedSlides);
 
     try {
-      await ref.read(projectListProvider.notifier).updateProject(updatedProject);
+      await ref
+          .read(projectListProvider.notifier)
+          .updateProject(updatedProject);
       ref.read(currentProjectProvider.notifier).updateProject(updatedProject);
 
       if (mounted) {
         setState(() {
-          _selectedSlideIndex =
-              updatedSlides.length - adjustedSlides.length;
+          _selectedSlideIndex = updatedSlides.length - adjustedSlides.length;
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'AI 슬라이드 ${adjustedSlides.length}개가 추가되었습니다',
-            ),
-          ),
+          SnackBar(content: Text('AI 슬라이드 ${adjustedSlides.length}개가 추가되었습니다')),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('AI 슬라이드를 추가하지 못했습니다: $e'),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('AI 슬라이드를 추가하지 못했습니다: $e')));
       }
     }
   }

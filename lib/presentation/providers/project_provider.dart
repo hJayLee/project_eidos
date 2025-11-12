@@ -12,7 +12,7 @@ class ProjectList extends _$ProjectList {
   @override
   Future<List<LectureProject>> build() async {
     final userId = ref.watch(effectiveUserIdProvider);
-    
+
     final repository = ref.watch(projectRepositoryProvider);
     return repository.watchProjects(userId).first;
   }
@@ -20,12 +20,12 @@ class ProjectList extends _$ProjectList {
   /// 프로젝트 추가
   Future<void> addProject(LectureProject project) async {
     final userId = ref.watch(effectiveUserIdProvider);
-    
+
     try {
       final repository = ref.watch(projectRepositoryProvider);
       await repository.createProject(userId, project);
       print('✅ 프로젝트 저장 성공: ${project.id} (사용자: $userId)');
-      
+
       // 상태 새로고침
       ref.invalidateSelf();
     } catch (e) {
@@ -37,12 +37,12 @@ class ProjectList extends _$ProjectList {
   /// 프로젝트 업데이트
   Future<void> updateProject(LectureProject updatedProject) async {
     final userId = ref.watch(effectiveUserIdProvider);
-    
+
     try {
       final repository = ref.watch(projectRepositoryProvider);
       await repository.updateProject(userId, updatedProject);
       print('✅ 프로젝트 업데이트 성공: ${updatedProject.id} (사용자: $userId)');
-      
+
       // 상태 새로고침
       ref.invalidateSelf();
     } catch (e) {
@@ -54,10 +54,10 @@ class ProjectList extends _$ProjectList {
   /// 프로젝트 삭제
   Future<void> removeProject(String projectId) async {
     final userId = ref.watch(effectiveUserIdProvider);
-    
+
     final repository = ref.watch(projectRepositoryProvider);
     await repository.deleteProject(userId, projectId);
-    
+
     // 상태 새로고침
     ref.invalidateSelf();
   }
@@ -65,7 +65,7 @@ class ProjectList extends _$ProjectList {
   /// 프로젝트 검색
   Future<List<LectureProject>> searchProjects(String query) async {
     final userId = ref.watch(effectiveUserIdProvider);
-    
+
     final repository = ref.watch(projectRepositoryProvider);
     return repository.searchProjects(userId, query);
   }
@@ -97,9 +97,12 @@ class CurrentProject extends _$CurrentProject {
 
 /// 프로젝트 ID로 단일 프로젝트 로드
 @riverpod
-Stream<LectureProject?> projectById(ProjectByIdRef ref, String projectId) async* {
+Stream<LectureProject?> projectById(
+  ProjectByIdRef ref,
+  String projectId,
+) async* {
   final userId = ref.watch(effectiveUserIdProvider);
-  
+
   final repository = ref.watch(projectRepositoryProvider);
   yield* repository.watchProject(userId, projectId);
 }
@@ -112,66 +115,57 @@ class ProjectCreation extends _$ProjectCreation {
     return const ProjectCreationState.idle();
   }
 
-  /// 새 프로젝트 생성
-  Future<void> createProject({
+  /// 새 프로젝트 생성 및 슬라이드 자동 생성
+  Future<LectureProject> createProjectWithSlides({
     required String title,
-    required String overview,
-    String? detailedOutline,
-    Map<String, dynamic>? preferences,
-    String? scriptContent,
+    required List<String> slideOutlines,
   }) async {
     state = const ProjectCreationState.loading();
-    
+
     try {
-      final metadata = {
-        if (preferences != null) ...preferences,
-        if (detailedOutline != null && detailedOutline.isNotEmpty)
-          'detailed_outline': detailedOutline,
-      };
+      final primaryOverview = slideOutlines.isNotEmpty
+          ? slideOutlines.first
+          : '새 프로젝트';
 
       final project = LectureProject.create(
         title: title,
-        description: overview,
-        scriptContent: scriptContent,
-        extraMetadata: metadata.isEmpty ? null : metadata,
+        description: primaryOverview,
+        extraMetadata: {'initial_outlines': slideOutlines},
       );
-      
-      // 프로젝트 목록에 추가
-      ref.read(projectListProvider.notifier).addProject(project);
-      
-      // 현재 프로젝트로 선택
-      ref.read(currentProjectProvider.notifier).selectProject(project);
-      
-      state = ProjectCreationState.success(project);
-    } catch (e) {
-      state = ProjectCreationState.error(e.toString());
-    }
-  }
 
-  /// AI 슬라이드 생성
-  Future<void> generateSlides({
-    required LectureProject project,
-    required TemplateCategory category,
-    int maxSlides = 10,
-  }) async {
-    state = const ProjectCreationState.generating();
-    
-    try {
+      await ref.read(projectListProvider.notifier).addProject(project);
+      ref.read(currentProjectProvider.notifier).selectProject(project);
+
+      state = const ProjectCreationState.generating();
+
+      final desiredSlideCount = slideOutlines.isNotEmpty
+          ? slideOutlines.length
+          : 8;
+
       final slides = await SlideAIService.generateSlidesFromScript(
         script: project.script,
-        category: category,
-        maxSlides: maxSlides,
+        category: project.settings.templateCategory,
+        project: project,
+        prompt: slideOutlines.join('\n'),
+        keywords: slideOutlines,
+        maxSlides: desiredSlideCount,
       );
-      
-      final updatedProject = project.copyWith(slides: slides);
-      
-      // 프로젝트 업데이트
-      ref.read(projectListProvider.notifier).updateProject(updatedProject);
+
+      final updatedProject = project.copyWith(
+        slides: slides,
+        metadata: {...project.metadata, 'initial_outlines': slideOutlines},
+      );
+
+      await ref
+          .read(projectListProvider.notifier)
+          .updateProject(updatedProject);
       ref.read(currentProjectProvider.notifier).updateProject(updatedProject);
-      
+
       state = ProjectCreationState.slidesGenerated(updatedProject);
+      return updatedProject;
     } catch (e) {
       state = ProjectCreationState.error(e.toString());
+      rethrow;
     }
   }
 
@@ -184,12 +178,13 @@ class ProjectCreation extends _$ProjectCreation {
 /// 프로젝트 생성 상태
 sealed class ProjectCreationState {
   const ProjectCreationState();
-  
+
   const factory ProjectCreationState.idle() = _Idle;
   const factory ProjectCreationState.loading() = _Loading;
   const factory ProjectCreationState.generating() = _Generating;
   const factory ProjectCreationState.success(LectureProject project) = _Success;
-  const factory ProjectCreationState.slidesGenerated(LectureProject project) = _SlidesGenerated;
+  const factory ProjectCreationState.slidesGenerated(LectureProject project) =
+      _SlidesGenerated;
   const factory ProjectCreationState.error(String message) = _Error;
 }
 

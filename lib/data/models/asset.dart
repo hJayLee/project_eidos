@@ -1,5 +1,7 @@
 import 'package:uuid/uuid.dart';
+
 import '../../core/constants/app_constants.dart';
+import '../utils/json_date_parser.dart';
 
 /// 에셋 라이브러리 모델
 class Asset {
@@ -84,8 +86,8 @@ class Asset {
       ),
       fileSize: json['fileSize'] as int,
       thumbnailPath: json['thumbnailPath'] as String?,
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      lastUsed: DateTime.parse(json['lastUsed'] as String),
+      createdAt: parseDateTime(json['createdAt']),
+      lastUsed: parseDateTime(json['lastUsed']),
       tags: List<String>.from(json['tags'] ?? []),
       metadata: Map<String, dynamic>.from(json['metadata'] ?? {}),
     );
@@ -188,8 +190,8 @@ class BrandKit {
       colors: BrandColors.fromJson(json['colors'] as Map<String, dynamic>),
       fonts: BrandFonts.fromJson(json['fonts'] as Map<String, dynamic>),
       logoPath: json['logoPath'] as String?,
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      createdAt: parseDateTime(json['createdAt']),
+      updatedAt: parseDateTime(json['updatedAt']),
       isDefault: json['isDefault'] as bool? ?? false,
     );
   }
@@ -265,19 +267,11 @@ class BrandFonts {
   });
 
   factory BrandFonts.defaultFonts() {
-    return const BrandFonts(
-      heading: 'Inter',
-      body: 'Inter',
-      caption: 'Inter',
-    );
+    return const BrandFonts(heading: 'Inter', body: 'Inter', caption: 'Inter');
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'heading': heading,
-      'body': body,
-      'caption': caption,
-    };
+    return {'heading': heading, 'body': body, 'caption': caption};
   }
 
   factory BrandFonts.fromJson(Map<String, dynamic> json) {
@@ -288,10 +282,3 @@ class BrandFonts {
     );
   }
 }
-
-
-
-
-
-
-

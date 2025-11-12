@@ -1,14 +1,34 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
+import '../../data/models/project.dart';
 import '../../data/models/script.dart';
 import '../../data/models/slide.dart';
+import 'asset_suggestion_service.dart';
+import 'gpt5_nano_client.dart';
+import 'langchain_slide_pipeline.dart';
+import 'slide_generation_service.dart';
 
 /// AI 기반 슬라이드 생성 서비스
 class SlideAIService {
   static const String _openaiApiUrl =
       'https://api.openai.com/v1/chat/completions';
   static const String _apiKeyEnvVar = 'OPENAI_API_KEY';
+
+  static final Gpt5NanoClient _gpt5Client = Gpt5NanoClient();
+  static final SlideGenerationService _langChainGenerationService =
+      SlideGenerationService(
+        llmClient: _gpt5Client,
+        webSearchClient: const _NullWebSearchClient(),
+      );
+  static final AssetSuggestionService _assetSuggestionService =
+      AssetSuggestionService();
+  static final LangChainSlidePipeline _langChainPipeline =
+      LangChainSlidePipeline(
+        generationService: _langChainGenerationService,
+        assetSuggestionService: _assetSuggestionService,
+      );
 
   static String get _apiKey {
     const key = String.fromEnvironment(_apiKeyEnvVar);
@@ -25,53 +45,93 @@ class SlideAIService {
   static Future<List<SlideData>> generateSlidesFromScript({
     required Script script,
     required TemplateCategory category,
+    LectureProject? project,
+    String? prompt,
+    List<String>? keywords,
     int maxSlides = 10,
   }) async {
-    try {
-      // 1. 스크립트 분석 및 챕터 생성
-      final chapters = script.generateChapters();
-      if (chapters.isEmpty) {
-        throw Exception('스크립트에서 챕터를 추출할 수 없습니다');
-      }
+    final overview = _buildOverview(prompt, project, script);
+    final request = SlideGenerationRequest(
+      title: (project?.title?.trim().isNotEmpty ?? false)
+          ? project!.title
+          : 'AI ${category.displayName} 프레젠테이션',
+      overview: overview,
+      customBullets: keywords ?? const [],
+      desiredSlideCount: maxSlides,
+      tone: _mapCategoryToTone(category),
+      targetAudience: _resolveAudience(project),
+      additionalContext: _buildAdditionalContext(script, project, keywords),
+    );
 
-      final slides = <SlideData>[];
-      
-      // 2. 각 챕터별로 슬라이드 생성
-      for (int i = 0; i < chapters.length && i < maxSlides; i++) {
-        final chapter = chapters[i];
-        
-        try {
-          final slideContent = await _generateSlideContentWithAI(
-            title: chapter.title,
-            content: chapter.content,
-            category: category,
-            slideNumber: i + 1,
-            totalSlides: chapters.length,
-          );
-          
-          final slide = await _createSlideFromAIResponse(
-            slideContent: slideContent,
-            chapter: chapter,
-            order: i,
-          );
-          
-          slides.add(slide);
-          
-          // API 호출 간격 조절 (rate limiting 방지)
-          await Future.delayed(const Duration(milliseconds: 500));
-        } catch (e) {
-          print('슬라이드 ${i + 1} 생성 실패: $e');
-          
-          // AI 생성 실패 시 기본 슬라이드 생성
-          final fallbackSlide = _createFallbackSlide(chapter, i);
-          slides.add(fallbackSlide);
-        }
-      }
-      
-      return slides;
-    } catch (e) {
-      throw Exception('AI 슬라이드 생성 실패: $e');
+    final contextMetadata = <String, dynamic>{
+      'templateCategory': category.displayName,
+      if (prompt != null && prompt.trim().isNotEmpty)
+        'sourcePrompt': prompt.trim(),
+      if (keywords != null && keywords.isNotEmpty) 'keywords': keywords,
+    };
+    if (project?.metadata.isNotEmpty ?? false) {
+      contextMetadata['projectMetadata'] = project!.metadata;
     }
+
+    final slides = await _langChainPipeline.run(
+      context: GenerationContext(
+        projectId:
+            project?.id ?? 'ad-hoc-${DateTime.now().millisecondsSinceEpoch}',
+        request: request,
+        script: script,
+        metadata: contextMetadata,
+      ),
+    );
+
+    return [
+      for (final slide in slides)
+        slide.copyWith(
+          metadata: {
+            ...slide.metadata,
+            'generatedBy': 'LangChainSlidePipeline',
+            if (prompt != null && prompt.trim().isNotEmpty)
+              'sourcePrompt': prompt.trim(),
+            if (keywords != null && keywords.isNotEmpty) 'keywords': keywords,
+          },
+        ),
+    ];
+  }
+
+  /// 프롬프트를 기반으로 단일 슬라이드를 생성
+  static Future<SlideData> generateSlideFromPrompt({
+    required LectureProject project,
+    required String title,
+    required String prompt,
+    required int order,
+  }) async {
+    final trimmedPrompt = prompt.trim();
+    if (trimmedPrompt.isEmpty) {
+      throw ArgumentError('슬라이드 생성을 위한 프롬프트가 필요합니다.');
+    }
+
+    final category = project.settings.templateCategory;
+    final slideContent = await _generateSlideContentWithAI(
+      title: title,
+      content: trimmedPrompt,
+      category: category,
+      slideNumber: order + 1,
+      totalSlides: project.slides.length + 1,
+    );
+
+    final chapter = ScriptChapter(
+      id: const Uuid().v4(),
+      title: title,
+      content: trimmedPrompt,
+      order: order,
+      startTime: Duration.zero,
+      duration: const Duration(seconds: 60),
+    );
+
+    return _createSlideFromAIResponse(
+      slideContent: slideContent,
+      chapter: chapter,
+      order: order,
+    );
   }
 
   /// 슬라이드용 스크립트 생성
@@ -82,9 +142,11 @@ class SlideAIService {
     String? voiceTone,
   }) async {
     final bulletPoints = slide.elements
-        .where((element) =>
-            element.type == SlideElementType.text &&
-            element.data['style']?.toString().toLowerCase() == 'bullet')
+        .where(
+          (element) =>
+              element.type == SlideElementType.text &&
+              element.data['style']?.toString().toLowerCase() == 'bullet',
+        )
         .map((element) => element.data['text']?.toString() ?? '')
         .where((text) => text.trim().isNotEmpty)
         .toList();
@@ -141,12 +203,14 @@ class SlideAIService {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('OpenAI API 호출 실패: ${response.statusCode} - ${response.body}');
+      throw Exception(
+        'OpenAI API 호출 실패: ${response.statusCode} - ${response.body}',
+      );
     }
 
     final jsonResponse = jsonDecode(response.body);
     final aiContent = jsonResponse['choices'][0]['message']['content'];
-    
+
     // JSON 응답 파싱
     try {
       final cleanedContent = _cleanJsonResponse(aiContent);
@@ -159,7 +223,7 @@ class SlideAIService {
   /// 시스템 프롬프트 생성
   static String _buildSystemPrompt(TemplateCategory category) {
     String categoryGuidance = '';
-    
+
     switch (category) {
       case TemplateCategory.business:
         categoryGuidance = '''
@@ -258,18 +322,18 @@ JSON 형식으로만 응답해주세요.''';
     // 코드 블록 제거
     content = content.replaceAll(RegExp(r'```json\s*'), '');
     content = content.replaceAll(RegExp(r'```\s*'), '');
-    
+
     // 앞뒤 공백 제거
     content = content.trim();
-    
+
     // JSON 시작/끝 찾기
     final startIndex = content.indexOf('{');
     final endIndex = content.lastIndexOf('}');
-    
+
     if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
       content = content.substring(startIndex, endIndex + 1);
     }
-    
+
     return content;
   }
 
@@ -301,7 +365,8 @@ JSON 형식으로만 응답해주세요.''';
       elements.addAll(_createDefaultElements(chapter));
     }
 
-    final keyPoints = (slideContent['keyPoints'] as List?)
+    final keyPoints =
+        (slideContent['keyPoints'] as List?)
             ?.map((point) => point?.toString().trim())
             .where((point) => point != null && point.isNotEmpty)
             .cast<String>()
@@ -313,11 +378,7 @@ JSON 형식으로만 응답해주세요.''';
         for (final point in keyPoints)
           SlideElement.create(
             type: SlideElementType.text,
-            data: {
-              'text': point,
-              'style': 'bullet',
-                  'listType': 'bullet',
-            },
+            data: {'text': point, 'style': 'bullet', 'listType': 'bullet'},
           ),
       ];
       elements.addAll(bulletElements);
@@ -362,7 +423,8 @@ JSON 형식으로만 응답해주세요.''';
 
     if (response.statusCode != 200) {
       throw Exception(
-          'OpenAI API 호출 실패: ${response.statusCode} - ${response.body}');
+        'OpenAI API 호출 실패: ${response.statusCode} - ${response.body}',
+      );
     }
 
     final jsonResponse = jsonDecode(response.body);
@@ -390,10 +452,8 @@ JSON 형식으로만 응답해주세요.''';
     final categoryContext = switch (category) {
       TemplateCategory.presentation =>
         '전반적인 프레젠테이션 상황에 맞춰 청중의 집중을 유지하고, 핵심 메시지를 반복 강조합니다.',
-      TemplateCategory.business =>
-        '비즈니스 청중에게 실용적인 통찰을 제공하고, 핵심 액션 아이템을 강조합니다.',
-      TemplateCategory.education =>
-        '학습자 친화적인 언어로 개념을 설명하고, 단계적으로 이해를 도와야 합니다.',
+      TemplateCategory.business => '비즈니스 청중에게 실용적인 통찰을 제공하고, 핵심 액션 아이템을 강조합니다.',
+      TemplateCategory.education => '학습자 친화적인 언어로 개념을 설명하고, 단계적으로 이해를 도와야 합니다.',
       TemplateCategory.marketing =>
         '제품/서비스의 가치와 혜택을 명확히 전달하며, 설득력 있는 구성을 유지해야 합니다.',
       TemplateCategory.technology =>
@@ -454,8 +514,7 @@ $categoryContext
       ..writeln('요청 사항:')
       ..writeln('1. 위 내용을 기반으로 120~220자 내외의 발표용 스크립트를 작성하세요.')
       ..writeln('2. 서론→전개→결론 흐름을 따르되, 부자연스러운 연결어는 피하세요.')
-      ..writeln(
-          '3. 청중에게 말을 건네는 것처럼 자연스럽게 작성하고, 불필요한 형식적 문장은 제거하세요.')
+      ..writeln('3. 청중에게 말을 건네는 것처럼 자연스럽게 작성하고, 불필요한 형식적 문장은 제거하세요.')
       ..writeln('4. 결과는 순수한 문장들로만 반환하고 따로 머리말이나 끝맺음 문구는 넣지 마세요.');
 
     return buffer.toString();
@@ -545,19 +604,13 @@ $categoryContext
     return [
       SlideElement.create(
         type: SlideElementType.text,
-        data: {
-          'text': chapter.title,
-          'style': 'title',
-        },
+        data: {'text': chapter.title, 'style': 'title'},
         position: const ElementPosition(x: 100, y: 80),
         size: const ElementSize(width: 800, height: 100),
       ),
       SlideElement.create(
         type: SlideElementType.text,
-        data: {
-          'text': chapter.content,
-          'style': 'body',
-        },
+        data: {'text': chapter.content, 'style': 'body'},
         position: const ElementPosition(x: 100, y: 200),
         size: const ElementSize(width: 800, height: 400),
       ),
@@ -566,14 +619,100 @@ $categoryContext
 
   /// 폴백 슬라이드 생성
   static SlideData _createFallbackSlide(ScriptChapter chapter, int order) {
-    final slide = SlideData.create(
-      title: chapter.title,
-      order: order,
-    );
+    final slide = SlideData.create(title: chapter.title, order: order);
 
     final elements = _createDefaultElements(chapter);
     return slide.copyWith(elements: elements);
   }
+
+  static String _buildOverview(
+    String? prompt,
+    LectureProject? project,
+    Script script,
+  ) {
+    if (prompt != null && prompt.trim().isNotEmpty) {
+      return prompt.trim();
+    }
+    final projectDescription = project?.description.trim();
+    if (projectDescription != null && projectDescription.isNotEmpty) {
+      return projectDescription;
+    }
+    final scriptContent = script.content.trim();
+    if (scriptContent.isNotEmpty) {
+      return _truncate(scriptContent, 400);
+    }
+    return 'AI 기반 최신 트렌드 프레젠테이션';
+  }
+
+  static String _mapCategoryToTone(TemplateCategory category) {
+    switch (category) {
+      case TemplateCategory.business:
+        return '전문적이고 신뢰감 있는 비즈니스 톤';
+      case TemplateCategory.education:
+        return '친절하고 단계적인 교육용 톤';
+      case TemplateCategory.marketing:
+        return '설득력 있고 생동감 있는 마케팅 톤';
+      case TemplateCategory.technology:
+        return '미래지향적이며 혁신적인 기술 톤';
+      case TemplateCategory.creative:
+        return '감성적이고 영감을 주는 크리에이티브 톤';
+      case TemplateCategory.presentation:
+        return '명확하고 간결한 발표 톤';
+      case TemplateCategory.ai_video_editing:
+        return '첨단 AI 기술과 효율성을 강조하는 톤';
+      case TemplateCategory.business_automation:
+        return '생산성과 자동화를 강조하는 톤';
+    }
+  }
+
+  static String _resolveAudience(LectureProject? project) {
+    final metadataAudience = project?.metadata['targetAudience'];
+    if (metadataAudience is String && metadataAudience.trim().isNotEmpty) {
+      return metadataAudience.trim();
+    }
+    return '일반 비즈니스 청중';
+  }
+
+  static String? _buildAdditionalContext(
+    Script script,
+    LectureProject? project,
+    List<String>? keywords,
+  ) {
+    final buffer = StringBuffer();
+
+    if (project?.metadata.isNotEmpty ?? false) {
+      buffer.writeln('프로젝트 메타데이터: ${jsonEncode(project!.metadata)}');
+    }
+
+    if (keywords != null && keywords.isNotEmpty) {
+      buffer.writeln('중점 키워드: ${keywords.join(', ')}');
+    }
+
+    final scriptContent = script.content.trim();
+    if (scriptContent.isNotEmpty) {
+      buffer
+        ..writeln('--- 스크립트 전문 ---')
+        ..writeln(_truncate(scriptContent, 2000));
+    }
+
+    final value = buffer.toString().trim();
+    return value.isEmpty ? null : value;
+  }
+
+  static String _truncate(String value, int maxLength) {
+    if (value.length <= maxLength) return value;
+    return '${value.substring(0, maxLength)}…';
+  }
 }
 
+class _NullWebSearchClient implements WebSearchClient {
+  const _NullWebSearchClient();
 
+  @override
+  Future<List<WebSearchResult>> search({
+    required String query,
+    int maxResults = 2,
+  }) async {
+    return const [];
+  }
+}

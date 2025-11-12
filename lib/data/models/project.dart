@@ -1,10 +1,12 @@
 import 'package:uuid/uuid.dart';
+
 import '../../core/constants/app_constants.dart';
-import 'slide.dart';
-import 'avatar.dart';
-import 'script.dart';
+import '../utils/json_date_parser.dart';
 import 'asset.dart';
+import 'avatar.dart';
 import 'brand_kit.dart';
+import 'script.dart';
+import 'slide.dart';
 
 /// 강의 프로젝트 모델
 class LectureProject {
@@ -14,14 +16,14 @@ class LectureProject {
   final ProjectStatus status;
   final DateTime createdAt;
   final DateTime updatedAt;
-  
+
   // 프로젝트 구성 요소
   final Script script;
   final List<SlideData> slides;
   final Avatar? avatar;
   final BrandKit? brandKit;
   final ProjectSettings settings;
-  
+
   // 메타데이터
   final List<String> tags;
   final String? thumbnailPath;
@@ -55,7 +57,7 @@ class LectureProject {
   }) {
     final now = DateTime.now();
     final id = const Uuid().v4();
-    
+
     final defaultMetadata = {
       'creator': 'EidosStudio',
       'platform': 'web',
@@ -148,25 +150,23 @@ class LectureProject {
         (status) => status.id == json['status'],
         orElse: () => ProjectStatus.draft,
       ),
-      createdAt: json['createdAt'] != null 
-          ? DateTime.parse(json['createdAt'] as String)
-          : DateTime.now(),
-      updatedAt: json['updatedAt'] != null 
-          ? DateTime.parse(json['updatedAt'] as String)
-          : DateTime.now(),
-      script: json['script'] != null 
+      createdAt: parseDateTime(json['createdAt']),
+      updatedAt: parseDateTime(json['updatedAt']),
+      script: json['script'] != null
           ? Script.fromJson(json['script'] as Map<String, dynamic>)
           : Script.empty(),
       slides: (json['slides'] as List? ?? [])
           .map((slide) => SlideData.fromJson(slide as Map<String, dynamic>))
           .toList(),
-      avatar: json['avatar'] != null 
+      avatar: json['avatar'] != null
           ? Avatar.fromJson(json['avatar'] as Map<String, dynamic>)
           : null,
       brandKit: json['brandKit'] != null
           ? BrandKit.fromJson(json['brandKit'] as Map<String, dynamic>)
           : null,
-      settings: ProjectSettings.fromJson(json['settings'] as Map<String, dynamic>),
+      settings: ProjectSettings.fromJson(
+        json['settings'] as Map<String, dynamic>,
+      ),
       tags: List<String>.from(json['tags'] ?? []),
       thumbnailPath: json['thumbnailPath'] as String?,
       version: json['version'] as int? ?? 1,
@@ -198,15 +198,15 @@ class LectureProject {
     if (title.trim().isEmpty) {
       errors.add('프로젝트 제목이 필요합니다');
     }
-    
+
     if (script.content.trim().isEmpty) {
       warnings.add('스크립트 내용이 비어있습니다');
     }
-    
+
     if (slides.isEmpty) {
       warnings.add('슬라이드가 없습니다');
     }
-    
+
     // 슬라이드 검증
     for (int i = 0; i < slides.length; i++) {
       final slide = slides[i];
@@ -310,9 +310,7 @@ class ExportSettings {
   });
 
   factory ExportSettings.defaultSettings() {
-    return const ExportSettings(
-      formats: [ExportFormat.mp4, ExportFormat.pdf],
-    );
+    return const ExportSettings(formats: [ExportFormat.mp4, ExportFormat.pdf]);
   }
 
   Map<String, dynamic> toJson() {
@@ -328,13 +326,17 @@ class ExportSettings {
   factory ExportSettings.fromJson(Map<String, dynamic> json) {
     return ExportSettings(
       formats: (json['formats'] as List<dynamic>)
-          .map((name) => ExportFormat.values.firstWhere(
-                (format) => format.name == name,
-                orElse: () => ExportFormat.mp4,
-              ))
+          .map(
+            (name) => ExportFormat.values.firstWhere(
+              (format) => format.name == name,
+              orElse: () => ExportFormat.mp4,
+            ),
+          )
           .toList(),
-      videoBitrate: json['videoBitrate'] as int? ?? AppConstants.defaultVideoBitrate,
-      audioBitrate: json['audioBitrate'] as int? ?? AppConstants.defaultAudioBitrate,
+      videoBitrate:
+          json['videoBitrate'] as int? ?? AppConstants.defaultVideoBitrate,
+      audioBitrate:
+          json['audioBitrate'] as int? ?? AppConstants.defaultAudioBitrate,
       frameRate: (json['frameRate'] as num?)?.toDouble() ?? 30.0,
       includeWatermark: json['includeWatermark'] as bool? ?? false,
     );
@@ -368,7 +370,7 @@ class ProjectStats {
     final hours = totalDuration.inHours;
     final minutes = totalDuration.inMinutes % 60;
     final seconds = totalDuration.inSeconds % 60;
-    
+
     if (hours > 0) {
       return '${hours}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     } else {
@@ -417,11 +419,4 @@ enum AudioQuality {
 }
 
 /// 내보내기 형식
-enum ExportFormat {
-  mp4,
-  pptx,
-  pdf,
-  png;
-}
-
-
+enum ExportFormat { mp4, pptx, pdf, png }

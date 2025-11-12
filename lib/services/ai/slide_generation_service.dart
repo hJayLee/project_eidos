@@ -28,16 +28,17 @@ class SlideGenerationRequest {
 
 /// 슬라이드 생성 결과 메타데이터
 class SlideGenerationMetadata {
-  const SlideGenerationMetadata({
-    required this.references,
-  });
+  const SlideGenerationMetadata({required this.references});
 
   final List<String> references;
 }
 
 /// LLM 호출을 추상화한 인터페이스
 abstract class LlmClient {
-  Future<String> generate({required String prompt, Map<String, dynamic>? options});
+  Future<String> generate({
+    required String prompt,
+    Map<String, dynamic>? options,
+  });
 }
 
 /// 웹 검색/팩트 수집 추상화
@@ -46,7 +47,11 @@ abstract class WebSearchClient {
 }
 
 class WebSearchResult {
-  const WebSearchResult({required this.title, required this.snippet, required this.url});
+  const WebSearchResult({
+    required this.title,
+    required this.snippet,
+    required this.url,
+  });
 
   final String title;
   final String snippet;
@@ -61,11 +66,15 @@ class SlideGenerationException implements Exception {
   final Object? details;
 
   @override
-  String toString() => 'SlideGenerationException(message: $message, details: $details)';
+  String toString() =>
+      'SlideGenerationException(message: $message, details: $details)';
 }
 
 class SlideGenerationService {
-  SlideGenerationService({required this.llmClient, required this.webSearchClient});
+  SlideGenerationService({
+    required this.llmClient,
+    required this.webSearchClient,
+  });
 
   final LlmClient llmClient;
   final WebSearchClient webSearchClient;
@@ -84,10 +93,7 @@ class SlideGenerationService {
     try {
       rawResponse = await llmClient.generate(
         prompt: prompt,
-        options: {
-          'temperature': 0.4,
-          'response_format': 'json_object',
-        },
+        options: {'temperature': 0.4, 'response_format': 'json_object'},
       );
     } catch (error, stackTrace) {
       debugPrint('[SlideGeneration] LLM 호출 실패: $error');
@@ -101,17 +107,24 @@ class SlideGenerationService {
     return _mapToSlides(records, request);
   }
 
-  Future<List<WebSearchResult>> _collectFacts(SlideGenerationRequest request) async {
+  Future<List<WebSearchResult>> _collectFacts(
+    SlideGenerationRequest request,
+  ) async {
     final queries = <String>{request.title};
     if (request.overview.isNotEmpty) {
       queries.add(request.overview);
     }
-    queries.addAll(request.customBullets.where((bullet) => bullet.trim().isNotEmpty));
+    queries.addAll(
+      request.customBullets.where((bullet) => bullet.trim().isNotEmpty),
+    );
 
     final results = <WebSearchResult>[];
     for (final query in queries) {
       try {
-        final searchResults = await webSearchClient.search(query: query, maxResults: 2);
+        final searchResults = await webSearchClient.search(
+          query: query,
+          maxResults: 2,
+        );
         results.addAll(searchResults);
         if (results.length >= _maxFacts) break;
       } catch (error) {
@@ -138,13 +151,21 @@ class SlideGenerationService {
       ..writeln('- bullet은 핵심적인 메시지를 담고, 서로 중복되지 않도록 합니다.')
       ..writeln('- body에는 bullet이 다루지 못한 배경/맥락을 자연스러운 문장으로 작성합니다.')
       ..writeln('- 이미지와 아이콘은 실제 사용자가 교체할 수 있도록, 생성/검색 시 참고할 설명만 제공합니다.')
+      ..writeln(
+        '- imagePlacementHint 필드에는 hero-left, hero-right, full-bleed, split-right, split-left 중 하나를 사용하세요.',
+      )
+      ..writeln(
+        '- iconPlacementHint 필드에는 top-right, top-left, bottom-right, bottom-left, inline 중 하나를 사용하세요.',
+      )
       ..writeln('- 모든 사실 관계는 제공된 최신 정보(facts)를 우선 적용하고, 확인되지 않은 내용은 추측하지 않습니다.')
       ..writeln('- 각 슬라이드는 references 배열에 bullet/body에서 인용한 출처 URL을 포함합니다.')
       ..writeln()
       ..writeln('### 사용자 입력')
       ..writeln('- 제목: ${request.title}')
       ..writeln('- 개요: ${request.overview}')
-      ..writeln('- 선택 지정 bullet: ${request.customBullets.isEmpty ? '없음' : request.customBullets.join(" | ")}')
+      ..writeln(
+        '- 선택 지정 bullet: ${request.customBullets.isEmpty ? '없음' : request.customBullets.join(" | ")}',
+      )
       ..writeln('- 톤/스타일: ${request.tone ?? '전문적이고 명확한 톤'}')
       ..writeln('- 대상 청중: ${request.targetAudience ?? '일반 비즈니스 프레젠테이션'}')
       ..writeln('- 추가 컨텍스트: ${request.additionalContext ?? '없음'}')
@@ -172,7 +193,9 @@ class SlideGenerationService {
       "bullets": ["핵심 bullet", "..."],
       "body": "요약 본문",
       "imagePrompt": "이미지 생성/검색용 설명",
+      "imagePlacementHint": "hero-right",
       "iconKeywords": ["keyword1", "keyword2"],
+      "iconPlacementHint": "top-right",
       "references": ["https://..."]
     }
   ]
@@ -214,71 +237,194 @@ class SlideGenerationService {
     }
   }
 
-  List<SlideData> _mapToSlides(List<_SlideDraft> drafts, SlideGenerationRequest request) {
+  List<SlideData> _mapToSlides(
+    List<_SlideDraft> drafts,
+    SlideGenerationRequest request,
+  ) {
     return drafts.asMap().entries.map((entry) {
       final index = entry.key;
       final draft = entry.value;
 
       SlideData slide = SlideData.create(title: draft.title, order: index);
-      if (draft.body != null && draft.body!.trim().isNotEmpty) {
-        slide = slide.copyWith(
-          metadata: {
-            ...slide.metadata,
-            'body': draft.body,
-            'imagePrompt': draft.imagePrompt,
-            'iconKeywords': draft.iconKeywords,
-            'references': draft.references,
-          },
-        );
-      } else {
-        slide = slide.copyWith(
-          metadata: {
-            ...slide.metadata,
-            'imagePrompt': draft.imagePrompt,
-            'iconKeywords': draft.iconKeywords,
-            'references': draft.references,
-          },
-        );
-      }
+
+      final baseMetadata = {
+        ...slide.metadata,
+        'imagePrompt': draft.imagePrompt,
+        'imagePlacementHint': draft.imagePlacementHint,
+        'iconKeywords': draft.iconKeywords,
+        'iconPlacementHint': draft.iconPlacementHint,
+        'references': draft.references,
+      };
 
       if (draft.body != null && draft.body!.trim().isNotEmpty) {
-        slide = slide.copyWith(speakerNotes: draft.body);
+        slide = slide.copyWith(
+          metadata: {
+            ...baseMetadata,
+            'body': draft.body,
+          },
+          speakerNotes: draft.body,
+        );
+      } else {
+        slide = slide.copyWith(metadata: baseMetadata);
       }
 
       for (final bullet in draft.bullets) {
         final element = SlideElement.create(
           type: SlideElementType.text,
-          data: {
-            'text': bullet,
-            'listType': 'bullet',
-          },
+          data: {'text': bullet, 'listType': 'bullet', 'style': 'bullet'},
         );
         slide = slide.addElement(element);
-      }
-
-      if (draft.body != null && draft.body!.trim().isNotEmpty) {
-        final bodyElement = SlideElement.create(
-          type: SlideElementType.text,
-          data: {
-            'text': draft.body,
-            'style': 'paragraph',
-          },
-        );
-        slide = slide.addElement(bodyElement);
       }
 
       final refs = draft.references;
       if (refs.isNotEmpty) {
         slide = slide.copyWith(
-          metadata: {
-            ...slide.metadata,
-            'references': refs,
-          },
+          metadata: {...slide.metadata, 'references': refs},
         );
       }
 
-      return slide;
+      return _applyElementLayout(slide);
     }).toList();
+  }
+
+  SlideData _applyElementLayout(SlideData slide) {
+    SlideElement? titleElement;
+    final bulletElements = <SlideElement>[];
+    final otherTextElements = <SlideElement>[];
+    final imageElements = <SlideElement>[];
+    final iconElements = <SlideElement>[];
+    final residualElements = <SlideElement>[];
+
+    for (final element in slide.elements) {
+      switch (element.type) {
+        case SlideElementType.text:
+          final styleKey = element.data['style']?.toString().toLowerCase();
+          if (styleKey == 'title') {
+            titleElement ??= element;
+            continue;
+          }
+          if (styleKey == 'bullet') {
+            bulletElements.add(element);
+            continue;
+          }
+          otherTextElements.add(element);
+          continue;
+        case SlideElementType.image:
+          imageElements.add(element);
+          continue;
+        case SlideElementType.icon:
+          iconElements.add(element);
+          continue;
+        default:
+          residualElements.add(element);
+      }
+    }
+
+    if (titleElement == null && slide.title.trim().isNotEmpty) {
+      titleElement = SlideElement.create(
+        type: SlideElementType.text,
+        data: {'text': slide.title.trim(), 'style': 'title'},
+      );
+    }
+
+    final hasImage = imageElements.isNotEmpty;
+    final textAreaWidth = hasImage ? 420.0 : 720.0;
+    const titleTop = 96.0;
+    const titleLeft = 96.0;
+    const textLeft = 120.0;
+
+    final updatedElements = <SlideElement>[];
+    double currentY = titleTop;
+
+    if (titleElement != null) {
+      final placedTitle = titleElement.copyWith(
+        position: const ElementPosition(x: titleLeft, y: titleTop),
+        size: ElementSize(width: textAreaWidth, height: 72),
+        style: titleElement.style.copyWith(
+          fontSize: 36,
+          fontWeight: '700',
+          color: '#111827',
+          textAlign: 'left',
+        ),
+      );
+      updatedElements.add(placedTitle);
+      currentY = titleTop + 72 + 24;
+    }
+
+    for (final bullet in bulletElements) {
+      final placedBullet = bullet.copyWith(
+        position: ElementPosition(x: textLeft, y: currentY),
+        size: ElementSize(width: textAreaWidth, height: 48),
+        style: bullet.style.copyWith(
+          fontSize: 20,
+          fontWeight: '500',
+          color: '#1F2937',
+          textAlign: 'left',
+        ),
+      );
+      updatedElements.add(placedBullet);
+      currentY += 52;
+    }
+
+    for (final other in otherTextElements) {
+      final placedOther = other.copyWith(
+        position: ElementPosition(x: textLeft, y: currentY),
+        size: ElementSize(width: textAreaWidth, height: 44),
+        style: other.style.copyWith(
+          fontSize: other.style.fontSize ?? 18,
+          color: other.style.color ?? '#4B5563',
+          textAlign: other.style.textAlign ?? 'left',
+        ),
+      );
+      updatedElements.add(placedOther);
+      currentY += 48;
+    }
+
+    if (imageElements.isNotEmpty) {
+      double imageY = titleTop + 64;
+      final imageLeft = _clampDouble(
+        textLeft + textAreaWidth + 40,
+        520.0,
+        820.0,
+      );
+      for (final image in imageElements) {
+        final placedImage = image.copyWith(
+          position: ElementPosition(x: imageLeft, y: imageY),
+          size: const ElementSize(width: 360, height: 240),
+        );
+        updatedElements.add(placedImage);
+        imageY += 272;
+      }
+    }
+
+    if (iconElements.isNotEmpty) {
+      double iconY = titleTop;
+      final iconLeft = hasImage
+          ? _clampDouble(textLeft + textAreaWidth + 320, 680.0, 840.0)
+          : 760.0;
+      for (final icon in iconElements) {
+        final placedIcon = icon.copyWith(
+          position: ElementPosition(x: iconLeft, y: iconY),
+          size: const ElementSize(width: 88, height: 88),
+          style: icon.style.copyWith(
+            color: icon.style.color ?? '#3B82F6',
+            opacity: 1.0,
+          ),
+        );
+        updatedElements.add(placedIcon);
+        iconY += 104;
+      }
+    }
+
+    updatedElements.addAll(residualElements);
+
+    return slide.copyWith(elements: updatedElements);
+  }
+
+  double _clampDouble(double value, double min, double max) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
   }
 }
 
@@ -288,7 +434,9 @@ class _SlideDraft {
     required this.bullets,
     this.body,
     this.imagePrompt,
+    this.imagePlacementHint,
     this.iconKeywords = const [],
+    this.iconPlacementHint,
     this.references = const [],
   });
 
@@ -296,15 +444,26 @@ class _SlideDraft {
   final List<String> bullets;
   final String? body;
   final String? imagePrompt;
+  final String? imagePlacementHint;
   final List<String> iconKeywords;
+  final String? iconPlacementHint;
   final List<String> references;
 
   factory _SlideDraft.fromJson(Map<String, dynamic> json) {
     List<String> readStringList(dynamic value) {
       if (value is List) {
-        return value.whereType<String>().map((item) => item.trim()).where((item) => item.isNotEmpty).toList();
+        return value
+            .whereType<String>()
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty)
+            .toList();
       }
       return const [];
+    }
+
+    String? readHint(String? value) {
+      final trimmed = value?.trim().toLowerCase();
+      return trimmed?.isEmpty ?? true ? null : trimmed;
     }
 
     return _SlideDraft(
@@ -312,7 +471,9 @@ class _SlideDraft {
       bullets: readStringList(json['bullets']),
       body: (json['body'] as String?)?.trim(),
       imagePrompt: (json['imagePrompt'] as String?)?.trim(),
+      imagePlacementHint: readHint(json['imagePlacementHint'] as String?),
       iconKeywords: readStringList(json['iconKeywords']),
+      iconPlacementHint: readHint(json['iconPlacementHint'] as String?),
       references: readStringList(json['references']),
     );
   }

@@ -1,5 +1,7 @@
 import 'package:uuid/uuid.dart';
+
 import '../../core/constants/app_constants.dart';
+import '../utils/json_date_parser.dart';
 
 /// 아바타 모델 (HeyGen 기반)
 class Avatar {
@@ -111,8 +113,8 @@ class Avatar {
         (style) => style.name == json['style'],
         orElse: () => AvatarStyle.professional,
       ),
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
+      createdAt: parseDateTime(json['createdAt']),
+      updatedAt: parseDateTime(json['updatedAt']),
       status: AvatarStatus.values.firstWhere(
         (status) => status.name == json['status'],
         orElse: () => AvatarStatus.pending,
@@ -285,7 +287,7 @@ class AvatarVideoClip {
         (status) => status.name == json['status'],
         orElse: () => VideoClipStatus.pending,
       ),
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: parseDateTime(json['createdAt']),
       subtitlesPath: json['subtitlesPath'] as String?,
       metadata: Map<String, dynamic>.from(json['metadata'] ?? {}),
     );
@@ -375,10 +377,3 @@ enum VideoClipStatus {
   const VideoClipStatus(this.displayName);
   final String displayName;
 }
-
-
-
-
-
-
-
