@@ -1,12 +1,15 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 
 import '../../../core/constants/app_theme.dart';
+import '../../../data/models/avatar_job.dart';
 
 /// 강사 프로필 설정 페이지
 class InstructorProfilePage extends StatefulWidget {
@@ -36,6 +39,10 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
   bool _isSubmitting = false;
   String? _statusMessage;
 
+  // Firestore 리스닝
+  StreamSubscription? _jobSubscription;
+  AvatarJob? _currentJob;
+
   // 비디오
   String? _videoUrl;
   String? _videoError;
@@ -47,7 +54,51 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
     _nameController.dispose();
     _bioController.dispose();
     _videoController?.dispose();
+    _jobSubscription?.cancel();
     super.dispose();
+  }
+
+  // Firestore 작업 리스닝 시작
+  void _listenToJob(String jobId) {
+    _jobSubscription?.cancel();
+    
+    _jobSubscription = FirebaseFirestore.instance
+        .collection('avatarJobs')
+        .doc(jobId)
+        .snapshots()
+        .listen(
+      (snapshot) {
+        if (!snapshot.exists || !mounted) return;
+
+        final job = AvatarJob.fromFirestore(snapshot);
+        
+        setState(() {
+          _currentJob = job;
+          _statusMessage = job.progress.displayText;
+        });
+
+        // 완료 시 비디오 로드
+        if (job.status == AvatarJobStatus.completed && job.videoUrl != null) {
+          if (_videoUrl != job.videoUrl) {
+            _loadVideo(job.videoUrl!);
+          }
+          _showSnackBar('아바타 영상이 생성되었습니다!', isSuccess: true);
+        }
+
+        // 실패 시
+        if (job.status == AvatarJobStatus.failed) {
+          setState(() {
+            _videoError = job.errorMessage ?? '알 수 없는 오류';
+            _isSubmitting = false;
+          });
+          _showSnackBar('영상 생성 실패: ${job.errorMessage}', isSuccess: false);
+        }
+      },
+      onError: (error) {
+        debugPrint('Firestore 리스닝 오류: $error');
+        _showSnackBar('작업 상태 확인 중 오류 발생', isSuccess: false);
+      },
+    );
   }
 
   Future<void> _pickImage() async {
@@ -110,18 +161,27 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
     }
 
     if (_imageBytes == null || _audioBytes == null) {
-      _showSnackBar('이미지와 오디오 파일을 모두 첨부해주세요.');
+      _showSnackBar('이미지와 오디오 파일을 모두 첨부해주세요.', isSuccess: false);
       return;
     }
 
     setState(() {
       _isSubmitting = true;
       _statusMessage = '생성 요청을 전송 중입니다...';
+      _currentJob = null;
+      _videoUrl = null;
+      _videoError = null;
+      _videoController?.dispose();
+      _videoController = null;
     });
 
     try {
-      final uri = Uri.parse('$_backendBaseUrl/generate');
+      // Cloud Tasks 엔드포인트 호출 (수시간 처리 가능)
+      final uri = Uri.parse('$_backendBaseUrl/generate-with-tasks');
       final request = http.MultipartRequest('POST', uri)
+        ..fields['userId'] = 'user_123' // TODO: 실제 사용자 ID
+        ..fields['instructorName'] = _nameController.text
+        ..fields['instructorBio'] = _bioController.text
         ..files.add(
           http.MultipartFile.fromBytes(
             'image',
@@ -143,40 +203,38 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final Map<String, dynamic> body =
             jsonDecode(response.body) as Map<String, dynamic>;
-        final String? videoUrl = body['videoUrl'] as String?;
+        final String? jobId = body['jobId'] as String?;
 
         if (!mounted) return;
 
-        setState(() {
-          _statusMessage = '생성 요청이 접수되었습니다.';
-          _videoError = null;
-        });
-
-        if (videoUrl != null && videoUrl.isNotEmpty) {
-          await _loadVideo(videoUrl);
-        } else {
-          if (!mounted) return;
+        if (jobId != null && jobId.isNotEmpty) {
           setState(() {
-            _videoUrl = null;
-            _videoController = null;
-            _videoError = '생성된 영상 URL을 찾을 수 없습니다.';
+            _statusMessage = '작업이 시작되었습니다. 잠시만 기다려주세요...';
+          });
+          
+          // Firestore 리스닝 시작
+          _listenToJob(jobId);
+          
+          _showSnackBar('영상 생성이 시작되었습니다 (ID: $jobId)', isSuccess: true);
+        } else {
+          setState(() {
+            _statusMessage = '작업 ID를 받지 못했습니다.';
+            _isSubmitting = false;
           });
         }
       } else {
         setState(() {
           _statusMessage =
               '생성 요청 실패 (${response.statusCode})\n${response.body}';
-          _videoError = null;
+          _isSubmitting = false;
         });
       }
     } catch (error) {
       setState(() {
         _statusMessage = '요청 중 오류가 발생했습니다: $error';
-      });
-    } finally {
-      setState(() {
         _isSubmitting = false;
       });
+      _showSnackBar('오류: $error', isSuccess: false);
     }
   }
 
@@ -226,10 +284,13 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
     }
   }
 
-  void _showSnackBar(String message) {
+  void _showSnackBar(String message, {bool isSuccess = true}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isSuccess ? Colors.green : Colors.red,
+      ),
     );
   }
 
@@ -403,8 +464,11 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
 
         const SizedBox(height: 24),
 
-        // 상태 메시지
-        if (_statusMessage != null)
+        // 상태 메시지 및 진행률
+        if (_currentJob != null)
+          _buildJobProgressCard(_currentJob!),
+
+        if (_statusMessage != null && _currentJob == null)
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -470,6 +534,219 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
         const SizedBox(height: 24),
       ],
     );
+  }
+
+  /// 작업 진행 상황 카드
+  Widget _buildJobProgressCard(AvatarJob job) {
+    final progress = job.progress;
+    final isProcessing = job.status == AvatarJobStatus.processing;
+    final isCompleted = job.status == AvatarJobStatus.completed;
+    final isFailed = job.status == AvatarJobStatus.failed;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceVariant.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _getJobStatusColor(job.status).withValues(alpha: 0.3),
+          width: 2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 상태 헤더
+          Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: _getJobStatusColor(job.status),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  _getJobStatusText(job.status),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              if (isProcessing)
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // 진행률 바
+          if (isProcessing || isCompleted) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: progress.percentage / 100,
+                minHeight: 8,
+                backgroundColor: Colors.grey[300],
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  _getJobStatusColor(job.status),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            
+            // 진행 단계
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${progress.stepNumber} / ${progress.totalSteps} 단계',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  '${progress.percentage}%',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: _getJobStatusColor(job.status),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+          
+          // 현재 단계 메시지
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _getStepIcon(progress.currentStep),
+                  size: 20,
+                  color: _getJobStatusColor(job.status),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    progress.displayText,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // 오류 메시지
+          if (isFailed && job.errorMessage != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.red.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      job.errorMessage!,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          
+          // 완료 시간
+          if (isCompleted && job.completedAt != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              '완료 시간: ${_formatDateTime(job.completedAt!)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Color _getJobStatusColor(AvatarJobStatus status) {
+    switch (status) {
+      case AvatarJobStatus.pending:
+        return Colors.grey;
+      case AvatarJobStatus.processing:
+        return Colors.blue;
+      case AvatarJobStatus.completed:
+        return Colors.green;
+      case AvatarJobStatus.failed:
+        return Colors.red;
+    }
+  }
+
+  String _getJobStatusText(AvatarJobStatus status) {
+    switch (status) {
+      case AvatarJobStatus.pending:
+        return '대기 중';
+      case AvatarJobStatus.processing:
+        return '생성 중';
+      case AvatarJobStatus.completed:
+        return '생성 완료';
+      case AvatarJobStatus.failed:
+        return '생성 실패';
+    }
+  }
+
+  IconData _getStepIcon(String step) {
+    switch (step) {
+      case 'avatar_creation':
+        return Icons.person_add_outlined;
+      case 'voice_cloning':
+        return Icons.record_voice_over;
+      case 'video_generation':
+        return Icons.video_library;
+      case 'completed':
+        return Icons.check_circle_outline;
+      case 'failed':
+        return Icons.error_outline;
+      default:
+        return Icons.hourglass_empty;
+    }
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    return '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')} '
+        '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 }
 
