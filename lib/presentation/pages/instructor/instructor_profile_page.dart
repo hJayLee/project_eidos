@@ -60,12 +60,6 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
     _checkAuthAndLoadJobs();
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _checkAuthAndLoadJobs();
-  }
-
   // 로그인 확인 및 작업 로드
   Future<void> _checkAuthAndLoadJobs() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -158,6 +152,7 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
       if (processingJob.status == AvatarJobStatus.processing ||
           processingJob.status == AvatarJobStatus.pending) {
         _listenToJob(processingJob.jobId);
+        _restoreJobState(processingJob); // 상태 복원 추가
       } else if (processingJob.status == AvatarJobStatus.completed) {
         // 가장 최근 완료 작업 표시
         setState(() {
@@ -177,6 +172,25 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
         _isLoadingJobs = false;
       });
     }
+  }
+
+  // 작업 상태를 UI에 복원
+  void _restoreJobState(AvatarJob job) {
+    setState(() {
+      // 입력 필드 복원
+      _nameController.text = job.instructorName;
+      _bioController.text = job.instructorBio;
+      
+      // 진행 상태 복원
+      _isSubmitting = true;
+      _statusMessage = job.progress.displayText;
+      
+      // 파일 정보 복원 (이미지는 다시 로드할 수 없으므로 이름만 표시)
+      // 주의: 실제 바이트 데이터는 없으므로 "이미지 재업로드 필요" 메시지를 표시할 수도 있음
+      // 하지만 진행 중인 작업 확인용으로는 이름만으로 충분
+      _imageName = "이전 업로드 이미지";
+      _audioName = "이전 업로드 오디오";
+    });
   }
 
   @override
@@ -419,6 +433,27 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
         });
       }
     }
+  }
+
+  // 폼 초기화
+  void _resetForm() {
+    _jobSubscription?.cancel();
+    setState(() {
+      _isSubmitting = false;
+      _statusMessage = null;
+      _currentJob = null;
+      _videoUrl = null;
+      _videoError = null;
+      _videoController?.dispose();
+      _videoController = null;
+      
+      _nameController.clear();
+      _bioController.clear();
+      _imageBytes = null;
+      _imageName = null;
+      _audioBytes = null;
+      _audioName = null;
+    });
   }
 
   void _showSnackBar(String message, {bool isSuccess = true}) {
@@ -673,6 +708,7 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
         // 강사명 입력
         TextFormField(
           controller: _nameController,
+          enabled: !_isSubmitting, // 진행 중 비활성화
           decoration: const InputDecoration(
             labelText: '강사명',
             hintText: '예: 홍길동',
@@ -686,12 +722,13 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
             return null;
           },
         ),
-
+        
         const SizedBox(height: 16),
-
+        
         // 강사소개 입력
         TextFormField(
           controller: _bioController,
+          enabled: !_isSubmitting, // 진행 중 비활성화
           decoration: const InputDecoration(
             labelText: '강사소개',
             hintText: '강사에 대한 간단한 소개를 입력하세요',
@@ -786,6 +823,16 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
         // 상태 메시지 및 진행률
         if (_currentJob != null)
           _buildJobProgressCard(_currentJob!),
+
+        // 진행 중일 때 취소/초기화 버튼
+        if (_isSubmitting && _currentJob != null)
+          Center(
+            child: TextButton.icon(
+              onPressed: _resetForm,
+              icon: const Icon(Icons.refresh),
+              label: const Text('새 작업 시작하기'),
+            ),
+          ),
 
         if (_statusMessage != null && _currentJob == null)
           Container(

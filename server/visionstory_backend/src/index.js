@@ -526,9 +526,42 @@ app.post("/worker/process-avatar", async (req, res) => {
   console.log(`[Worker] Processing job ${jobId}`);
 
   try {
-    // 1. 상태 업데이트: processing
+    // 0. 멱등성 체크 (중복 실행 방지)
+    const jobRef = db.collection("avatarJobs").doc(jobId);
+    const jobDoc = await jobRef.get();
+
+    if (!jobDoc.exists) {
+      console.error(`[Worker ${jobId}] Job not found`);
+      return res.status(404).json({ error: "Job not found" });
+    }
+
+    const jobData = jobDoc.data();
+
+    // 이미 완료되었거나 실패한 작업은 건너뜀
+    if (jobData.status === "completed") {
+      console.log(`[Worker ${jobId}] Job already completed. Skipping.`);
+      return res.json({ success: true, message: "Already completed" });
+    }
+
+    // 이미 처리 중이고, 최근(10분 이내)에 시작된 작업이면 건너뜀 (Cloud Tasks 재시도 방지)
+    // 단, workerStartedAt이 아주 오래되었다면(예: 2시간 전) 워커가 죽은 것이므로 재시도 허용
+    if (jobData.status === "processing" && jobData.workerStartedAt) {
+      const startTime = jobData.workerStartedAt.toDate();
+      const now = new Date();
+      const diffMinutes = (now - startTime) / 1000 / 60;
+
+      if (diffMinutes < 60) { // 60분 이내면 중복 실행으로 간주
+        console.log(`[Worker ${jobId}] Job already running (started ${diffMinutes.toFixed(1)} min ago). Skipping.`);
+        return res.json({ success: true, message: "Already running" });
+      }
+      
+      console.log(`[Worker ${jobId}] Job seems stuck (started ${diffMinutes.toFixed(1)} min ago). Restarting.`);
+    }
+
+    // 1. 상태 업데이트: processing & 시작 시간 기록
     await updateJobProgress(jobId, {
       status: "processing",
+      workerStartedAt: admin.firestore.FieldValue.serverTimestamp(),
       progress: {
         currentStep: "avatar_creation",
         stepNumber: 1,
@@ -537,46 +570,54 @@ app.post("/worker/process-avatar", async (req, res) => {
       },
     });
 
-    // 2. 아바타 생성
-    console.log(`[Worker ${jobId}] Step 1: Creating avatar`);
-    
-    const imageBase64 = await encodeBase64(imagePath);
-    const imageMimeType = getMimeType(imageFilename);
-
-    const avatarPayload = {
-      inline_data: {
-        mime_type: imageMimeType,
-        data: imageBase64,
-      },
-    };
-
-    const avatarUrl = `${VISIONSTORY_API_BASE}/api/v1/avatar`;
-    const avatarHeaders = new Headers();
-    avatarHeaders.set("X-API-Key", VISIONSTORY_API_KEY);
-    avatarHeaders.set("Content-Type", "application/json");
-    avatarHeaders.set("Accept", "application/json");
-
-    const avatarResponse = await fetch(avatarUrl, {
-      method: "POST",
-      headers: avatarHeaders,
-      body: JSON.stringify(avatarPayload),
-    });
-
-    if (!avatarResponse.ok) {
-      const errorText = await avatarResponse.text();
-      throw new Error(`Avatar creation failed: ${avatarResponse.status} ${errorText}`);
-    }
-
-    const avatarData = await avatarResponse.json();
-    const avatarId = avatarData?.data?.avatar_id;
+    // 2. 아바타 생성 (또는 기존 아바타 사용)
+    let avatarId = jobData.avatarId;
 
     if (!avatarId) {
-      throw new Error("Avatar creation succeeded but no avatar_id was returned.");
+      console.log(`[Worker ${jobId}] Step 1: Creating avatar`);
+      
+      const imageBase64 = await encodeBase64(imagePath);
+      const imageMimeType = getMimeType(imageFilename);
+
+      const avatarPayload = {
+        inline_data: {
+          mime_type: imageMimeType,
+          data: imageBase64,
+        },
+      };
+
+      const avatarUrl = `${VISIONSTORY_API_BASE}/api/v1/avatar`;
+      const avatarHeaders = new Headers();
+      avatarHeaders.set("X-API-Key", VISIONSTORY_API_KEY);
+      avatarHeaders.set("Content-Type", "application/json");
+      avatarHeaders.set("Accept", "application/json");
+
+      const avatarResponse = await fetch(avatarUrl, {
+        method: "POST",
+        headers: avatarHeaders,
+        body: JSON.stringify(avatarPayload),
+      });
+
+      if (!avatarResponse.ok) {
+        const errorText = await avatarResponse.text();
+        throw new Error(`Avatar creation failed: ${avatarResponse.status} ${errorText}`);
+      }
+
+      const avatarData = await avatarResponse.json();
+      avatarId = avatarData?.data?.avatar_id;
+
+      if (!avatarId) {
+        throw new Error("Avatar creation succeeded but no avatar_id was returned.");
+      }
+
+      // 아바타 ID 저장 (재시도 시 재사용)
+      await updateJobProgress(jobId, { avatarId });
+      console.log(`[Worker ${jobId}] Avatar created: ${avatarId}`);
+    } else {
+      console.log(`[Worker ${jobId}] Step 1: Using existing avatar ${avatarId}`);
     }
 
-    console.log(`[Worker ${jobId}] Avatar created: ${avatarId}`);
-
-    // 3. 비디오 생성 요청
+    // 3. 비디오 생성 요청 (또는 기존 요청 사용)
     await updateJobProgress(jobId, {
       progress: {
         currentStep: "video_generation",
@@ -586,51 +627,59 @@ app.post("/worker/process-avatar", async (req, res) => {
       },
     });
 
-    console.log(`[Worker ${jobId}] Step 2: Requesting video generation`);
-
-    const audioBase64 = await encodeBase64(audioPath);
-    const audioMimeType = getMimeType(audioFilename);
-
-    const videoPayload = {
-      model_id: "vs_talk_v1",
-      avatar_id: avatarId,
-      audio_script: {
-        inline_data: {
-          mime_type: audioMimeType,
-          data: audioBase64,
-        },
-        voice_change: true,
-        denoise: true,
-      },
-      emotion: "news",
-      aspect_ratio: "9:16",
-      resolution: "720p",
-    };
-
-    const videoUrl = `${VISIONSTORY_API_BASE}/api/v1/video`;
-
-    const videoResponse = await fetch(videoUrl, {
-      method: "POST",
-      headers: {
-        "X-API-Key": VISIONSTORY_API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(videoPayload),
-    });
-
-    if (!videoResponse.ok) {
-      const errorText = await videoResponse.text();
-      throw new Error(`Video creation failed: ${videoResponse.status} ${errorText}`);
-    }
-
-    const videoData = await videoResponse.json();
-    const videoId = videoData?.data?.video_id;
+    let videoId = jobData.videoId;
 
     if (!videoId) {
-      throw new Error("Video creation request succeeded but no video_id was returned.");
-    }
+      console.log(`[Worker ${jobId}] Step 2: Requesting video generation`);
 
-    console.log(`[Worker ${jobId}] Video generation started: ${videoId}`);
+      const audioBase64 = await encodeBase64(audioPath);
+      const audioMimeType = getMimeType(audioFilename);
+
+      const videoPayload = {
+        model_id: "vs_talk_v1",
+        avatar_id: avatarId,
+        audio_script: {
+          inline_data: {
+            mime_type: audioMimeType,
+            data: audioBase64,
+          },
+          voice_change: true,
+          denoise: true,
+        },
+        emotion: "news",
+        aspect_ratio: "9:16",
+        resolution: "720p",
+      };
+
+      const videoUrl = `${VISIONSTORY_API_BASE}/api/v1/video`;
+
+      const videoResponse = await fetch(videoUrl, {
+        method: "POST",
+        headers: {
+          "X-API-Key": VISIONSTORY_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(videoPayload),
+      });
+
+      if (!videoResponse.ok) {
+        const errorText = await videoResponse.text();
+        throw new Error(`Video creation failed: ${videoResponse.status} ${errorText}`);
+      }
+
+      const videoData = await videoResponse.json();
+      videoId = videoData?.data?.video_id;
+
+      if (!videoId) {
+        throw new Error("Video creation request succeeded but no video_id was returned.");
+      }
+
+      // 비디오 ID 저장 (재시도 시 재사용)
+      await updateJobProgress(jobId, { videoId });
+      console.log(`[Worker ${jobId}] Video generation started: ${videoId}`);
+    } else {
+      console.log(`[Worker ${jobId}] Step 2: Using existing video request ${videoId}`);
+    }
 
     // 4. 폴링 시작 (수시간 소요 가능)
     await updateJobProgress(jobId, {
