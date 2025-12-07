@@ -164,9 +164,11 @@ class LectureProject {
       brandKit: json['brandKit'] != null
           ? BrandKit.fromJson(json['brandKit'] as Map<String, dynamic>)
           : null,
-      settings: ProjectSettings.fromJson(
-        json['settings'] as Map<String, dynamic>,
-      ),
+      settings: json['settings'] != null
+          ? ProjectSettings.fromJson(
+              json['settings'] as Map<String, dynamic>,
+            )
+          : ProjectSettings.defaultSettings(),
       tags: List<String>.from(json['tags'] ?? []),
       thumbnailPath: json['thumbnailPath'] as String?,
       version: json['version'] as int? ?? 1,

@@ -1,25 +1,20 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_constants.dart';
 import '../../data/models/project.dart';
 import '../../data/models/script.dart';
 import '../../data/models/slide.dart';
 import 'asset_suggestion_service.dart';
-import 'gpt5_nano_client.dart';
+import 'gemini_client.dart';
 import 'langchain_slide_pipeline.dart';
 import 'slide_generation_service.dart';
 
 /// AI 기반 슬라이드 생성 서비스
 class SlideAIService {
-  static const String _openaiApiUrl =
-      'https://api.openai.com/v1/chat/completions';
-  static const String _apiKeyEnvVar = 'OPENAI_API_KEY';
-
-  static final Gpt5NanoClient _gpt5Client = Gpt5NanoClient();
+  static final GeminiClient _geminiClient = GeminiClient();
   static final SlideGenerationService _langChainGenerationService =
       SlideGenerationService(
-        llmClient: _gpt5Client,
+        llmClient: _geminiClient,
         webSearchClient: const _NullWebSearchClient(),
       );
   static final AssetSuggestionService _assetSuggestionService =
@@ -29,17 +24,6 @@ class SlideAIService {
         generationService: _langChainGenerationService,
         assetSuggestionService: _assetSuggestionService,
       );
-
-  static String get _apiKey {
-    const key = String.fromEnvironment(_apiKeyEnvVar);
-    if (key.isEmpty) {
-      throw StateError(
-        'OpenAI API 키가 설정되지 않았습니다. '
-        '"flutter run --dart-define=$_apiKeyEnvVar=YOUR_KEY" 형식으로 전달하세요.',
-      );
-    }
-    return key;
-  }
 
   /// 스크립트를 기반으로 슬라이드 생성
   static Future<List<SlideData>> generateSlidesFromScript({
@@ -185,31 +169,16 @@ class SlideAIService {
       totalSlides: totalSlides,
     );
 
-    final response = await http.post(
-      Uri.parse(_openaiApiUrl),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $_apiKey',
-      },
-      body: jsonEncode({
-        'model': 'gpt-4',
-        'messages': [
-          {'role': 'system', 'content': systemPrompt},
-          {'role': 'user', 'content': userPrompt},
-        ],
-        'max_tokens': 1500,
+    final fullPrompt = '$systemPrompt\n\n$userPrompt';
+
+    final aiContent = await _geminiClient.generate(
+      prompt: fullPrompt,
+      options: {
         'temperature': 0.7,
-      }),
+        'max_tokens': 8192,
+        'response_format': 'json_object',
+      },
     );
-
-    if (response.statusCode != 200) {
-      throw Exception(
-        'OpenAI API 호출 실패: ${response.statusCode} - ${response.body}',
-      );
-    }
-
-    final jsonResponse = jsonDecode(response.body);
-    final aiContent = jsonResponse['choices'][0]['message']['content'];
 
     // JSON 응답 파싱
     try {
@@ -404,33 +373,17 @@ JSON 형식으로만 응답해주세요.''';
       voiceTone: voiceTone,
     );
 
-    final response = await http.post(
-      Uri.parse(_openaiApiUrl),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $_apiKey',
-      },
-      body: jsonEncode({
-        'model': 'gpt-4',
-        'messages': [
-          {'role': 'system', 'content': systemPrompt},
-          {'role': 'user', 'content': userPrompt},
-        ],
-        'max_tokens': 800,
+    final fullPrompt = '$systemPrompt\n\n$userPrompt';
+
+    final content = await _geminiClient.generate(
+      prompt: fullPrompt,
+      options: {
         'temperature': 0.7,
-      }),
+        'max_tokens': 8192,
+      },
     );
 
-    if (response.statusCode != 200) {
-      throw Exception(
-        'OpenAI API 호출 실패: ${response.statusCode} - ${response.body}',
-      );
-    }
-
-    final jsonResponse = jsonDecode(response.body);
-    final content = jsonResponse['choices'][0]['message']['content'] as String?;
-
-    if (content == null || content.trim().isEmpty) {
+    if (content.trim().isEmpty) {
       throw Exception('AI로부터 유효한 스크립트를 받지 못했습니다.');
     }
 

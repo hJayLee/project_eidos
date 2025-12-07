@@ -10,6 +10,7 @@ import '../../widgets/common/project_card.dart';
 import '../../widgets/common/empty_state.dart';
 import '../../widgets/common/login_required_dialog.dart';
 import '../editor/editor_page.dart';
+import '../instructor/instructor_profile_page.dart';
 
 /// 홈 페이지 - 프로젝트 목록 및 새 프로젝트 생성
 class HomePage extends ConsumerStatefulWidget {
@@ -338,9 +339,13 @@ class _HomePageState extends ConsumerState<HomePage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),
-            tooltip: '설정',
+            tooltip: '강사 프로필 설정',
             onPressed: () {
-              // TODO: 설정 페이지로 이동
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const InstructorProfilePage(),
+                ),
+              );
             },
           ),
           if (isAuthenticated && !isAnonymous) ...[

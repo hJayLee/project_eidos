@@ -100,9 +100,13 @@ class FirestoreProjectRepository implements ProjectRepository {
       if (!snapshot.exists) {
         return null;
       }
+      final data = snapshot.data();
+      if (data == null) {
+        return null;
+      }
       return LectureProject.fromJson({
         'id': snapshot.id,
-        ...snapshot.data()!,
+        ...data,
       });
     });
   }
