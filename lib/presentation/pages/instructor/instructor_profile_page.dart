@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -41,12 +42,142 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
   // Firestore 리스닝
   StreamSubscription? _jobSubscription;
   AvatarJob? _currentJob;
+  
+  // 사용자 정보
+  User? _currentUser;
+  bool _isLoadingJobs = true;
+  List<AvatarJob> _userJobs = [];
 
   // 비디오
   String? _videoUrl;
   String? _videoError;
   VideoPlayerController? _videoController;
   bool _isVideoLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthAndLoadJobs();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthAndLoadJobs();
+  }
+
+  // 로그인 확인 및 작업 로드
+  Future<void> _checkAuthAndLoadJobs() async {
+    final user = FirebaseAuth.instance.currentUser;
+    
+    if (!mounted) return;
+    
+    if (user == null) {
+      // 로그인되지 않은 경우 로그인 페이지로 이동
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showLoginRequiredDialog();
+        }
+      });
+      return;
+    }
+
+    setState(() {
+      _currentUser = user;
+    });
+
+    // 사용자의 작업 이력 로드
+    await _loadUserJobs();
+  }
+
+  // 로그인 필요 다이얼로그
+  void _showLoginRequiredDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('로그인 필요'),
+        content: const Text('강사 프로필 설정을 위해 로그인이 필요합니다.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pop(); // 프로필 페이지도 닫기
+            },
+            child: const Text('닫기'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pop();
+              // TODO: 로그인 페이지로 이동
+              // Navigator.pushNamed(context, '/login');
+            },
+            child: const Text('로그인하기'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 사용자의 작업 이력 로드
+  Future<void> _loadUserJobs() async {
+    if (_currentUser == null) return;
+
+    setState(() {
+      _isLoadingJobs = true;
+    });
+
+    try {
+      // 최근 작업 10개 가져오기 (생성 시간 역순)
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('avatarJobs')
+          .where('userId', isEqualTo: _currentUser!.uid)
+          .orderBy('createdAt', descending: true)
+          .limit(10)
+          .get();
+
+      final jobs = querySnapshot.docs
+          .map((doc) => AvatarJob.fromFirestore(doc))
+          .toList();
+
+      if (!mounted) return;
+
+      setState(() {
+        _userJobs = jobs;
+        _isLoadingJobs = false;
+      });
+
+      // 진행 중인 작업이 있으면 자동으로 리스닝 시작
+      final processingJob = jobs.firstWhere(
+        (job) => job.status == AvatarJobStatus.processing || 
+                 job.status == AvatarJobStatus.pending,
+        orElse: () => jobs.first,
+      );
+
+      if (processingJob.status == AvatarJobStatus.processing ||
+          processingJob.status == AvatarJobStatus.pending) {
+        _listenToJob(processingJob.jobId);
+      } else if (processingJob.status == AvatarJobStatus.completed) {
+        // 가장 최근 완료 작업 표시
+        setState(() {
+          _currentJob = processingJob;
+          _statusMessage = '마지막 작업: ${processingJob.progress.displayText}';
+        });
+        
+        if (processingJob.videoUrl != null) {
+          _loadVideo(processingJob.videoUrl!);
+        }
+      }
+    } catch (e) {
+      debugPrint('작업 이력 로드 실패: $e');
+      if (!mounted) return;
+      
+      setState(() {
+        _isLoadingJobs = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -159,6 +290,13 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
       return;
     }
 
+    // 로그인 확인
+    if (_currentUser == null) {
+      _showSnackBar('로그인이 필요합니다', isSuccess: false);
+      _showLoginRequiredDialog();
+      return;
+    }
+
     if (_imageBytes == null || _audioBytes == null) {
       _showSnackBar('이미지와 오디오 파일을 모두 첨부해주세요.', isSuccess: false);
       return;
@@ -178,7 +316,7 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
       // Cloud Tasks 엔드포인트 호출 (수시간 처리 가능)
       final uri = Uri.parse('$_backendBaseUrl/generate-with-tasks');
       final request = http.MultipartRequest('POST', uri)
-        ..fields['userId'] = 'user_123' // TODO: 실제 사용자 ID
+        ..fields['userId'] = _currentUser!.uid  // 실제 사용자 ID 사용
         ..fields['instructorName'] = _nameController.text
         ..fields['instructorBio'] = _bioController.text
         ..files.add(
@@ -295,6 +433,18 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    // 로딩 중
+    if (_isLoadingJobs && _currentUser != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('강사 프로필 설정'),
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('강사 프로필 설정'),
@@ -316,11 +466,19 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 작업 이력 섹션 (있을 경우)
+              if (_userJobs.isNotEmpty) ...[
+                _buildJobHistorySection(),
+                const SizedBox(height: 32),
+                const Divider(),
+                const SizedBox(height: 32),
+              ],
+              
               // 섹션 1: 강사 정보
               _buildSection1(),
-
+              
               const SizedBox(height: 32),
-
+              
               // 섹션 2: AI 아바타 등록
               _buildSection2(),
             ],
@@ -328,6 +486,168 @@ class _InstructorProfilePageState extends State<InstructorProfilePage> {
         ),
       ),
     );
+  }
+
+  /// 작업 이력 섹션
+  Widget _buildJobHistorySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.history, size: 28),
+            const SizedBox(width: 12),
+            Text(
+              '작업 이력',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _loadUserJobs,
+              icon: const Icon(Icons.refresh, size: 20),
+              label: const Text('새로고침'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        
+        // 작업 목록
+        ..._userJobs.take(3).map((job) => Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _buildJobHistoryCard(job),
+        )),
+        
+        if (_userJobs.length > 3)
+          Center(
+            child: TextButton(
+              onPressed: () {
+                // TODO: 전체 작업 목록 페이지로 이동
+                _showSnackBar('전체 작업 목록 페이지는 준비 중입니다', isSuccess: true);
+              },
+              child: Text('${_userJobs.length - 3}개 더 보기'),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// 작업 이력 카드
+  Widget _buildJobHistoryCard(AvatarJob job) {
+    return InkWell(
+      onTap: () {
+        // 이 작업 다시 로드
+        _listenToJob(job.jobId);
+        
+        if (job.status == AvatarJobStatus.completed && job.videoUrl != null) {
+          _loadVideo(job.videoUrl!);
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceVariant.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _currentJob?.jobId == job.jobId
+                ? AppTheme.primaryBlue
+                : Theme.of(context).dividerColor.withValues(alpha: 0.2),
+            width: _currentJob?.jobId == job.jobId ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            // 상태 아이콘
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: _getJobStatusColor(job.status).withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _getJobStatusIcon(job.status),
+                color: _getJobStatusColor(job.status),
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 16),
+            
+            // 작업 정보
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    job.instructorName.isNotEmpty ? job.instructorName : '이름 없음',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _getJobStatusText(job.status),
+                    style: TextStyle(
+                      color: _getJobStatusColor(job.status),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (job.status == AvatarJobStatus.processing) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '${job.progress.percentage}% 완료',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            
+            // 생성 시간
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  _formatDateTime(job.createdAt),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                if (job.status == AvatarJobStatus.completed) ...[
+                  const SizedBox(height: 4),
+                  const Icon(
+                    Icons.play_circle_outline,
+                    size: 20,
+                    color: AppTheme.success,
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _getJobStatusIcon(AvatarJobStatus status) {
+    switch (status) {
+      case AvatarJobStatus.pending:
+        return Icons.schedule;
+      case AvatarJobStatus.processing:
+        return Icons.autorenew;
+      case AvatarJobStatus.completed:
+        return Icons.check_circle;
+      case AvatarJobStatus.failed:
+        return Icons.error;
+    }
   }
 
   /// 섹션 1: 강사명, 강사소개 입력

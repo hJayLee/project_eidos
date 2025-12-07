@@ -1,9 +1,11 @@
+import 'package:http/http.dart' as http;
+
 /// Backend 서비스 URL 관리
 class BackendConfig {
   // VisionStory 서비스 (아바타 생성)
   static const String visionStoryUrl = String.fromEnvironment(
     'VISIONSTORY_BACKEND_URL',
-    defaultValue: 'https://visionstory-backend-실제주소-an.a.run.app',
+    defaultValue: 'https://visionstory-backend-5mhpr2kjqa-du.a.run.app',
   );
 
   // Slide Generator 서비스 (슬라이드 생성) - 예정

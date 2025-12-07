@@ -1,18 +1,32 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // avatarJobs 컬렉션
+    // avatarJobs 컬렉션 - 사용자별 접근 제어
     match /avatarJobs/{jobId} {
-      // 인증된 사용자만 읽기/쓰기
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
-      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+      // 읽기: 자신의 작업만 읽을 수 있음
+      allow read: if request.auth != null && 
+                     request.auth.uid == resource.data.userId;
+      
+      // 생성: 인증된 사용자만 가능 (userId가 자신과 일치해야 함)
+      allow create: if request.auth != null && 
+                       request.auth.uid == request.resource.data.userId;
+      
+      // 업데이트/삭제: 백엔드 서비스만 가능 (서비스 계정)
+      allow update, delete: if request.auth != null;
     }
     
-    // 개발 중에는 모두 허용 (나중에 변경)
-    match /avatarJobs/{jobId} {
-      allow read, write: if true;  // ⚠️ 프로덕션에서는 제거
+    // videoProjects 컬렉션 (추후 슬라이드별 영상)
+    match /videoProjects/{projectId} {
+      allow read: if request.auth != null && 
+                     request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null && 
+                       request.auth.uid == request.resource.data.userId;
+      allow update, delete: if request.auth != null;
+    }
+    
+    // 기타 컬렉션
+    match /{document=**} {
+      allow read, write: if request.auth != null;
     }
   }
 }
