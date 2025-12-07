@@ -1,6 +1,12 @@
 {
   "GEMINI_API_KEY": "your_gemini_api_key_here",
   "OPENAI_API_KEY": "your_openai_api_key_here",
-  "VISIONSTORY_API_KEY": "your_visionstory_api_key_here"
+  "VISIONSTORY_API_KEY": "your_visionstory_api_key_here",
+  
+  "_comment": "Backend service URLs (automatically managed)",
+  "BACKEND_SERVICES": {
+    "visionstory": "https://visionstory-backend-xxx-an.a.run.app",
+    "slide_generator": "https://slide-generator-xxx-an.a.run.app",
+    "video_processor": "https://video-processor-xxx-an.a.run.app"
+  }
 }
-

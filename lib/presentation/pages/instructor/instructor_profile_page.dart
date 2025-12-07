@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 
 import '../../../core/constants/app_theme.dart';
+import '../../../core/constants/backend_config.dart';
 import '../../../data/models/avatar_job.dart';
 
 /// 강사 프로필 설정 페이지
@@ -20,10 +21,8 @@ class InstructorProfilePage extends StatefulWidget {
 }
 
 class _InstructorProfilePageState extends State<InstructorProfilePage> {
-  static const _backendBaseUrl = String.fromEnvironment(
-    'BACKEND_URL',
-    defaultValue: 'http://127.0.0.1:5001',
-  );
+  // Backend URL을 중앙에서 관리
+  String get _backendBaseUrl => BackendConfig.visionStoryUrl;
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
