@@ -2,54 +2,28 @@ import 'package:flutter/material.dart';
 
 /// 앱 전역 상수 정의
 class AppConstants {
-  // 색상 상수
-  static const Color primaryColor = Color(0xFF2563EB);
-  static const Color secondaryColor = Color(0xFFF59E0B);
-  static const Color backgroundColor = Color(0xFF0F172A);
-  static const Color surfaceColor = Color(0xFF1E293B);
-  static const Color textPrimaryColor = Color(0xFFF8FAFC);
-  static const Color textSecondaryColor = Color(0xFF94A3B8);
-  static const Color accentColor = Color(0xFF3B82F6);
-  static const Color errorColor = Color(0xFFEF4444);
-  static const Color successColor = Color(0xFF10B981);
-  static const Color warningColor = Color(0xFFF59E0B);
-  
-  // 텍스트 스타일
-  static const TextStyle headingLarge = TextStyle(
-    fontSize: 32,
-    fontWeight: FontWeight.bold,
-    color: textPrimaryColor,
-  );
-  
-  static const TextStyle headingMedium = TextStyle(
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
-    color: textPrimaryColor,
-  );
-  
-  static const TextStyle headingSmall = TextStyle(
-    fontSize: 20,
-    fontWeight: FontWeight.w600,
-    color: textPrimaryColor,
-  );
-  
-  static const TextStyle bodyLarge = TextStyle(
-    fontSize: 16,
-    fontWeight: FontWeight.normal,
-    color: textPrimaryColor,
-  );
-  
-  static const TextStyle bodyMedium = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.normal,
-    color: textPrimaryColor,
-  );
-  
-  static const TextStyle bodySmall = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.normal,
-    color: textSecondaryColor,
-  );
+  // 색상 상수 (Modern Dark Theme Palette)
+  // Primary: Electric Indigo
+  static const Color primaryColor = Color(0xFF6366F1); 
+  // Secondary: Teal (for accents, success)
+  static const Color secondaryColor = Color(0xFF14B8A6); 
+  // Background: Deep Slate (Darker, richer)
+  static const Color backgroundColor = Color(0xFF0F172A); 
+  // Surface: Slate 800 (Slightly lighter than background)
+  static const Color surfaceColor = Color(0xFF1E293B); 
+  // Surface Highlight: Slate 700 (For hover, pressed states)
+  static const Color surfaceHighlightColor = Color(0xFF334155);
+
+  // Text Colors
+  static const Color textPrimaryColor = Color(0xFFF1F5F9); // Slate 100
+  static const Color textSecondaryColor = Color(0xFF94A3B8); // Slate 400
+  static const Color textTertiaryColor = Color(0xFF64748B); // Slate 500
+
+  // Status Colors
+  static const Color errorColor = Color(0xFFEF4444); // Red 500
+  static const Color successColor = Color(0xFF10B981); // Emerald 500
+  static const Color warningColor = Color(0xFFF59E0B); // Amber 500
+  static const Color infoColor = Color(0xFF3B82F6); // Blue 500
   
   // 간격 상수
   static const double spacingXS = 4.0;
@@ -64,11 +38,12 @@ class AppConstants {
   static const double radiusM = 8.0;
   static const double radiusL = 12.0;
   static const double radiusXL = 16.0;
+  static const double radiusXXL = 24.0;
   
-  // 그림자 상수
+  // 그림자 상수 (Soft shadows for dark mode)
   static const List<BoxShadow> shadowS = [
     BoxShadow(
-      color: Color(0x1A000000),
+      color: Color(0x40000000),
       blurRadius: 4,
       offset: Offset(0, 2),
     ),
@@ -76,7 +51,7 @@ class AppConstants {
   
   static const List<BoxShadow> shadowM = [
     BoxShadow(
-      color: Color(0x1A000000),
+      color: Color(0x40000000),
       blurRadius: 8,
       offset: Offset(0, 4),
     ),
@@ -84,14 +59,14 @@ class AppConstants {
   
   static const List<BoxShadow> shadowL = [
     BoxShadow(
-      color: Color(0x1A000000),
-      blurRadius: 16,
+      color: Color(0x40000000),
+      blurRadius: 24,
       offset: Offset(0, 8),
     ),
   ];
   
   // 애니메이션 지속시간
-  static const Duration animationFast = Duration(milliseconds: 150);
+  static const Duration animationFast = Duration(milliseconds: 200);
   static const Duration animationNormal = Duration(milliseconds: 300);
   static const Duration animationSlow = Duration(milliseconds: 500);
   

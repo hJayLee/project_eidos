@@ -14,8 +14,8 @@ admin.initializeApp({
   credential: admin.credential.applicationDefault(),
 });
 
-// Cloud Tasks 클라이언트 초기화
-const tasksClient = new CloudTasksClient();
+// Cloud Tasks 클라이언트 초기화 (gRPC 타입 에러 방지를 위해 REST fallback 사용)
+const tasksClient = new CloudTasksClient({ fallback: "rest" });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -139,10 +139,10 @@ app.post(
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         progress: {
-          currentStep: "pending",
-          stepNumber: 0,
-          totalSteps: 3,
-          message: "작업이 큐에 추가되었습니다",
+               currentStep: "pending",
+               stepNumber: 0,
+               totalSteps: 4, // 총 4단계로 변경
+               message: "작업이 큐에 추가되었습니다",
         },
         videoUrl: null,
         errorMessage: null,
@@ -174,9 +174,14 @@ app.post(
               imageFilename: image.originalname,
               audioFilename: audio.originalname,
             })
-          ).toString("base64"),
+          ).toString("base64"), // REST 모드에서는 base64 문자열 필수
         },
       };
+
+      // v2 API 사용 시 Buffer 객체 자체를 전달해야 할 수도 있음
+      // 하지만 @google-cloud/tasks v3.1.0 이상에서는 base64 문자열이 권장됨
+      // 오류가 발생하면 Buffer로 변경해볼 것:
+      // body: Buffer.from(JSON.stringify({...}))
 
       await tasksClient.createTask({ parent: queuePath, task });
 
@@ -560,212 +565,213 @@ app.post("/worker/process-avatar", async (req, res) => {
 
     // 1. 상태 업데이트: processing & 시작 시간 기록
     await updateJobProgress(jobId, {
-      status: "processing",
-      workerStartedAt: admin.firestore.FieldValue.serverTimestamp(),
-      progress: {
-        currentStep: "avatar_creation",
-        stepNumber: 1,
-        totalSteps: 3,
-        message: "아바타 생성 시작...",
-      },
-    });
+             status: "processing",
+             workerStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+             progress: {
+               currentStep: "avatar_creation",
+               stepNumber: 1,
+               totalSteps: 4,
+               message: "아바타 생성 시작...",
+             },
+           });
 
-    // 2. 아바타 생성 (또는 기존 아바타 사용)
-    let avatarId = jobData.avatarId;
+           // 2. 아바타 생성 (또는 기존 아바타 사용)
+           let avatarId = jobData.avatarId;
 
-    if (!avatarId) {
-      console.log(`[Worker ${jobId}] Step 1: Creating avatar`);
-      
-      const imageBase64 = await encodeBase64(imagePath);
-      const imageMimeType = getMimeType(imageFilename);
+           if (!avatarId) {
+             console.log(`[Worker ${jobId}] Step 1: Creating avatar`);
+             
+             const imageBase64 = await encodeBase64(imagePath);
+             const imageMimeType = getMimeType(imageFilename);
 
-      const avatarPayload = {
-        inline_data: {
-          mime_type: imageMimeType,
-          data: imageBase64,
-        },
-      };
+             const avatarPayload = {
+               inline_data: {
+                 mime_type: imageMimeType,
+                 data: imageBase64,
+               },
+             };
 
-      const avatarUrl = `${VISIONSTORY_API_BASE}/api/v1/avatar`;
-      const avatarHeaders = new Headers();
-      avatarHeaders.set("X-API-Key", VISIONSTORY_API_KEY);
-      avatarHeaders.set("Content-Type", "application/json");
-      avatarHeaders.set("Accept", "application/json");
+             const avatarUrl = `${VISIONSTORY_API_BASE}/api/v1/avatar`;
+             const avatarHeaders = new Headers();
+             avatarHeaders.set("X-API-Key", VISIONSTORY_API_KEY);
+             avatarHeaders.set("Content-Type", "application/json");
+             avatarHeaders.set("Accept", "application/json");
 
-      const avatarResponse = await fetch(avatarUrl, {
-        method: "POST",
-        headers: avatarHeaders,
-        body: JSON.stringify(avatarPayload),
-      });
+             const avatarResponse = await fetch(avatarUrl, {
+               method: "POST",
+               headers: avatarHeaders,
+               body: JSON.stringify(avatarPayload),
+             });
 
-      if (!avatarResponse.ok) {
-        const errorText = await avatarResponse.text();
-        throw new Error(`Avatar creation failed: ${avatarResponse.status} ${errorText}`);
-      }
+             if (!avatarResponse.ok) {
+               const errorText = await avatarResponse.text();
+               throw new Error(`Avatar creation failed: ${avatarResponse.status} ${errorText}`);
+             }
 
-      const avatarData = await avatarResponse.json();
-      avatarId = avatarData?.data?.avatar_id;
+             const avatarData = await avatarResponse.json();
+             avatarId = avatarData?.data?.avatar_id;
 
-      if (!avatarId) {
-        throw new Error("Avatar creation succeeded but no avatar_id was returned.");
-      }
+             if (!avatarId) {
+               throw new Error("Avatar creation succeeded but no avatar_id was returned.");
+             }
 
-      // 아바타 ID 저장 (재시도 시 재사용)
-      await updateJobProgress(jobId, { avatarId });
-      console.log(`[Worker ${jobId}] Avatar created: ${avatarId}`);
-    } else {
-      console.log(`[Worker ${jobId}] Step 1: Using existing avatar ${avatarId}`);
-    }
+             // 아바타 ID 저장 (재시도 시 재사용)
+             await updateJobProgress(jobId, { avatarId });
+             console.log(`[Worker ${jobId}] Avatar created: ${avatarId}`);
+           } else {
+             console.log(`[Worker ${jobId}] Step 1: Using existing avatar ${avatarId}`);
+           }
 
-    // 3. 비디오 생성 요청 (또는 기존 요청 사용)
-    await updateJobProgress(jobId, {
-      progress: {
-        currentStep: "video_generation",
-        stepNumber: 2,
-        totalSteps: 3,
-        message: "비디오 생성 요청 중...",
-      },
-    });
+           // 3. 비디오 생성 요청 (또는 기존 요청 사용)
+           await updateJobProgress(jobId, {
+             progress: {
+               currentStep: "video_generation",
+               stepNumber: 2,
+               totalSteps: 4,
+               message: "비디오 생성 요청 중...",
+             },
+           });
 
-    let videoId = jobData.videoId;
+           let videoId = jobData.videoId;
 
-    if (!videoId) {
-      console.log(`[Worker ${jobId}] Step 2: Requesting video generation`);
+           if (!videoId) {
+             console.log(`[Worker ${jobId}] Step 2: Requesting video generation`);
 
-      const audioBase64 = await encodeBase64(audioPath);
-      const audioMimeType = getMimeType(audioFilename);
+             const audioBase64 = await encodeBase64(audioPath);
+             const audioMimeType = getMimeType(audioFilename);
 
-      const videoPayload = {
-        model_id: "vs_talk_v1",
-        avatar_id: avatarId,
-        audio_script: {
-          inline_data: {
-            mime_type: audioMimeType,
-            data: audioBase64,
-          },
-          voice_change: true,
-          denoise: true,
-        },
-        emotion: "news",
-        aspect_ratio: "9:16",
-        resolution: "720p",
-      };
+             const videoPayload = {
+               model_id: "vs_talk_v1",
+               avatar_id: avatarId,
+               audio_script: {
+                 inline_data: {
+                   mime_type: audioMimeType,
+                   data: audioBase64,
+                 },
+                 voice_change: true,
+                 denoise: true,
+               },
+               emotion: "news",
+               aspect_ratio: "16:9",
+               resolution: "720p",
+             };
 
-      const videoUrl = `${VISIONSTORY_API_BASE}/api/v1/video`;
+             const videoUrl = `${VISIONSTORY_API_BASE}/api/v1/video`;
 
-      const videoResponse = await fetch(videoUrl, {
-        method: "POST",
-        headers: {
-          "X-API-Key": VISIONSTORY_API_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(videoPayload),
-      });
+             const videoResponse = await fetch(videoUrl, {
+               method: "POST",
+               headers: {
+                 "X-API-Key": VISIONSTORY_API_KEY,
+                 "Content-Type": "application/json",
+               },
+               body: JSON.stringify(videoPayload),
+             });
 
-      if (!videoResponse.ok) {
-        const errorText = await videoResponse.text();
-        throw new Error(`Video creation failed: ${videoResponse.status} ${errorText}`);
-      }
+             if (!videoResponse.ok) {
+               const errorText = await videoResponse.text();
+               throw new Error(`Video creation failed: ${videoResponse.status} ${errorText}`);
+             }
 
-      const videoData = await videoResponse.json();
-      videoId = videoData?.data?.video_id;
+             const videoData = await videoResponse.json();
+             videoId = videoData?.data?.video_id;
 
-      if (!videoId) {
-        throw new Error("Video creation request succeeded but no video_id was returned.");
-      }
+             if (!videoId) {
+               throw new Error("Video creation request succeeded but no video_id was returned.");
+             }
 
-      // 비디오 ID 저장 (재시도 시 재사용)
-      await updateJobProgress(jobId, { videoId });
-      console.log(`[Worker ${jobId}] Video generation started: ${videoId}`);
-    } else {
-      console.log(`[Worker ${jobId}] Step 2: Using existing video request ${videoId}`);
-    }
+             // 비디오 ID 저장 (재시도 시 재사용)
+             await updateJobProgress(jobId, { videoId });
+             console.log(`[Worker ${jobId}] Video generation started: ${videoId}`);
+           } else {
+             console.log(`[Worker ${jobId}] Step 2: Using existing video request ${videoId}`);
+           }
 
-    // 4. 폴링 시작 (수시간 소요 가능)
-    await updateJobProgress(jobId, {
-      progress: {
-        currentStep: "video_generation",
-        stepNumber: 3,
-        totalSteps: 3,
-        message: "비디오 생성 중... (폴링 시작)",
-      },
-    });
+           // 4. 폴링 시작 (수시간 소요 가능)
+           await updateJobProgress(jobId, {
+             progress: {
+               currentStep: "video_generation",
+               stepNumber: 3,
+               totalSteps: 4,
+               message: "비디오 생성 중... (폴링 시작)",
+             },
+           });
 
-    console.log(`[Worker ${jobId}] Step 3: Polling for video completion`);
+           console.log(`[Worker ${jobId}] Step 3: Polling for video completion`);
 
-    const maxAttempts = 360; // 최대 60시간 (10분 × 360)
-    const pollInterval = 10 * 60 * 1000; // 10분
-    let attempts = 0;
-    let finalVideoData = null;
+           const maxAttempts = 21600; // 최대 60시간 (10초 × 6회/분 × 60분 × 60시간)
+           const pollInterval = 10 * 1000; // 10초
+           let attempts = 0;
+           let finalVideoData = null;
 
-    while (attempts < maxAttempts) {
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      attempts++;
+           while (attempts < maxAttempts) {
+             await new Promise((resolve) => setTimeout(resolve, pollInterval));
+             attempts++;
 
-      const elapsedMinutes = attempts * 10;
-      console.log(`[Worker ${jobId}] Polling attempt ${attempts} (${elapsedMinutes}분 경과)`);
+             const elapsedSeconds = attempts * 10;
+             const elapsedMinutes = (elapsedSeconds / 60).toFixed(1);
+             console.log(`[Worker ${jobId}] Polling attempt ${attempts} (${elapsedMinutes}분 경과)`);
 
-      const statusResponse = await fetch(
-        `${VISIONSTORY_API_BASE}/api/v1/video?video_id=${videoId}`,
-        {
-          method: "GET",
-          headers: {
-            "X-API-Key": VISIONSTORY_API_KEY,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+             const statusResponse = await fetch(
+               `${VISIONSTORY_API_BASE}/api/v1/video?video_id=${videoId}`,
+               {
+                 method: "GET",
+                 headers: {
+                   "X-API-Key": VISIONSTORY_API_KEY,
+                   "Content-Type": "application/json",
+                 },
+               }
+             );
 
-      if (!statusResponse.ok) {
-        const errorText = await statusResponse.text();
-        console.error(`[Worker ${jobId}] Status check failed: ${errorText}`);
-        // 일시적 오류일 수 있으므로 계속 진행
-        continue;
-      }
+             if (!statusResponse.ok) {
+               const errorText = await statusResponse.text();
+               console.error(`[Worker ${jobId}] Status check failed: ${errorText}`);
+               // 일시적 오류일 수 있으므로 계속 진행
+               continue;
+             }
 
-      const statusData = await statusResponse.json();
-      const status = statusData?.data?.status;
+             const statusData = await statusResponse.json();
+             const status = statusData?.data?.status;
 
-      console.log(`[Worker ${jobId}] Video status: ${status} (${elapsedMinutes}분 경과)`);
+             console.log(`[Worker ${jobId}] Video status: ${status} (${elapsedMinutes}분 경과)`);
 
-      // 진행 상황 업데이트
-      await updateJobProgress(jobId, {
-        progress: {
-          currentStep: "video_generation",
-          stepNumber: 3,
-          totalSteps: 3,
-          message: `비디오 생성 중... (${elapsedMinutes}분 경과, 상태: ${status})`,
-        },
-      });
+             // 진행 상황 업데이트
+             await updateJobProgress(jobId, {
+               progress: {
+                 currentStep: "video_generation",
+                 stepNumber: 3,
+                 totalSteps: 4,
+                 message: `비디오 생성 중... (${elapsedMinutes}분 경과, 상태: ${status})`,
+               },
+             });
 
-      if (status === "created") {
-        finalVideoData = statusData.data;
-        break;
-      } else if (status === "failed") {
-        throw new Error("Video generation failed at VisionStory.");
-      }
-    }
+             if (status === "created") {
+               finalVideoData = statusData.data;
+               break;
+             } else if (status === "failed") {
+               throw new Error("Video generation failed at VisionStory.");
+             }
+           }
 
-    if (!finalVideoData || !finalVideoData.video_url) {
-      throw new Error(
-        `Video generation timed out after ${attempts * 10} minutes (${attempts} attempts)`
-      );
-    }
+           if (!finalVideoData || !finalVideoData.video_url) {
+             throw new Error(
+               `Video generation timed out after ${attempts * 1} minutes (${attempts} attempts)`
+             );
+           }
 
-    console.log(`[Worker ${jobId}] Video completed: ${finalVideoData.video_url}`);
+           console.log(`[Worker ${jobId}] Video completed: ${finalVideoData.video_url}`);
 
-    // 5. 완료 상태 업데이트
-    await updateJobProgress(jobId, {
-      status: "completed",
-      completedAt: admin.firestore.FieldValue.serverTimestamp(),
-      videoUrl: finalVideoData.video_url,
-      progress: {
-        currentStep: "completed",
-        stepNumber: 3,
-        totalSteps: 3,
-        message: "아바타 영상 생성 완료!",
-      },
-    });
+           // 5. 완료 상태 업데이트
+           await updateJobProgress(jobId, {
+             status: "completed",
+             completedAt: admin.firestore.FieldValue.serverTimestamp(),
+             videoUrl: finalVideoData.video_url,
+             progress: {
+               currentStep: "completed",
+               stepNumber: 4,
+               totalSteps: 4,
+               message: "아바타 영상 생성 완료!",
+             },
+           });
 
     console.log(`[Worker ${jobId}] Job completed successfully`);
 
